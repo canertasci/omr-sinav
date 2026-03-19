@@ -1,0 +1,72 @@
+"""
+Firebase token doğrulama middleware.
+
+SKIP_AUTH=true olduğunda (geliştirme modu) token doğrulanmaz,
+test için sabit bir uid döndürülür.
+"""
+from __future__ import annotations
+
+import os
+import json
+from functools import lru_cache
+
+import firebase_admin
+from firebase_admin import auth, credentials
+from fastapi import Header, HTTPException
+
+_firebase_initialized = False
+
+
+def _init_firebase() -> None:
+    global _firebase_initialized
+    if _firebase_initialized:
+        return
+
+    # Önce JSON string'i dene (Railway/Render ortam değişkeni)
+    sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    if sa_json:
+        sa_dict = json.loads(sa_json)
+        cred = credentials.Certificate(sa_dict)
+    else:
+        # Dosya yolundan yükle (lokal geliştirme)
+        sa_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "firebase_service_account.json")
+        if not os.path.exists(sa_path):
+            raise RuntimeError(
+                f"Firebase service account bulunamadı: {sa_path}\n"
+                "FIREBASE_SERVICE_ACCOUNT_JSON veya FIREBASE_SERVICE_ACCOUNT_PATH "
+                ".env dosyasında tanımlı olmalı."
+            )
+        cred = credentials.Certificate(sa_path)
+
+    firebase_admin.initialize_app(cred)
+    _firebase_initialized = True
+
+
+async def verify_firebase_token(
+    authorization: str = Header(..., description="Bearer <firebase_id_token>"),
+) -> dict:
+    """
+    FastAPI Dependency — korumalı route'larda kullanılır.
+
+    Döner: {"uid": "...", "email": "...", ...}
+    """
+    # Geliştirme modu: auth'u atla
+    if os.getenv("SKIP_AUTH", "false").lower() == "true":
+        return {"uid": "dev_user_001", "email": "dev@example.com"}
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Geçersiz token formatı. 'Bearer <token>' formatında olmalı.",
+        )
+
+    token = authorization.split("Bearer ", 1)[1].strip()
+
+    try:
+        _init_firebase()
+        decoded = auth.verify_id_token(token)
+        return decoded  # {"uid": "...", "email": "...", ...}
+    except firebase_admin.exceptions.FirebaseError as exc:
+        raise HTTPException(status_code=401, detail=f"Token doğrulanamadı: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
