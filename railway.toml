@@ -1,0 +1,3 @@
+[build]
+dockerfilePath = "omr_app/backend/Dockerfile"
+buildContext = "omr_app/backend"
