@@ -8,7 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/scan_result.dart';
 
 // Backend URL — production'da Railway/Render URL'si
-const String _kBaseUrl = 'http://10.0.2.2:8000'; // Android emülatörde localhost
+const String _kBaseUrl = 'https://omr-sinav-production.up.railway.app';
 
 class ApiService {
   late final Dio _dio;
