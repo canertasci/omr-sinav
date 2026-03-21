@@ -1,5 +1,6 @@
 import streamlit as st
 import sqlite3, bcrypt, json, os, base64, time, tempfile
+from datetime import datetime
 import cv2, numpy as np, requests
 import pandas as pd
 from pdf2image import convert_from_path
@@ -142,6 +143,7 @@ def giris_sayfasi():
                 k = giris_kontrol(adi, sifre)
                 if k:
                     st.session_state.kullanici = k
+                    st.session_state.giris_saati = datetime.now().strftime("%H:%M")
                     st.rerun()
                 else:
                     st.error("Kullanıcı adı veya şifre hatalı!")
@@ -333,21 +335,25 @@ def _css_uygula():
     """, unsafe_allow_html=True)
 
 # ─── ANA SAYFA ───────────────────────────────────────────────
+@st.cache_data(ttl=60)
+def _dashboard_verileri(uid):
+    con = db_bag()
+    sablon_sayisi = con.execute("SELECT COUNT(*) FROM sablonlar WHERE kullanici_id=?", (uid,)).fetchone()[0]
+    tarama_sayisi = con.execute("SELECT COUNT(*) FROM taramalar WHERE kullanici_id=?", (uid,)).fetchone()[0]
+    listeler      = con.execute("SELECT ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?", (uid,)).fetchall()
+    son_taramalar = con.execute(
+        "SELECT anahtar_adi,sablon_adi,toplam_kagit,basarili,tarih "
+        "FROM taramalar WHERE kullanici_id=? ORDER BY id DESC LIMIT 5", (uid,)
+    ).fetchall()
+    con.close()
+    ogrenci_sayisi = sum(len(json.loads(r[0])) for r in listeler)
+    return sablon_sayisi, tarama_sayisi, ogrenci_sayisi, son_taramalar
+
 def sayfa_anasayfa():
     st.header("Ana Sayfa")
     uid = st.session_state.kullanici["id"]
     try:
-        con = db_bag()
-        sablon_sayisi  = con.execute("SELECT COUNT(*) FROM sablonlar WHERE kullanici_id=?", (uid,)).fetchone()[0]
-        tarama_sayisi  = con.execute("SELECT COUNT(*) FROM taramalar WHERE kullanici_id=?", (uid,)).fetchone()[0]
-        listeler       = con.execute("SELECT ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?", (uid,)).fetchall()
-        son_taramalar  = con.execute(
-            "SELECT anahtar_adi,sablon_adi,toplam_kagit,basarili,tarih "
-            "FROM taramalar WHERE kullanici_id=? ORDER BY id DESC LIMIT 5", (uid,)
-        ).fetchall()
-        con.close()
-
-        ogrenci_sayisi = sum(len(json.loads(r[0])) for r in listeler)
+        sablon_sayisi, tarama_sayisi, ogrenci_sayisi, son_taramalar = _dashboard_verileri(uid)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("📐 Şablon Sayısı", sablon_sayisi)
@@ -408,15 +414,52 @@ def sayfa_anahtar():
         sablon = st.selectbox("Şablon Seç", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
         ss     = sablon[2]
         adi    = st.text_input("Cevap Anahtarı Adı (örn: Vize 2025)")
-        st.subheader("Cevapları Seç")
+
+        tab1, tab2 = st.tabs(["✏️ Manuel Giriş", "📂 Dosyadan Yükle"])
         cevaplar = {}
-        for i in range(0, ss, 5):
-            cols = st.columns(5)
-            for j,col in enumerate(cols):
-                sno = i+j+1
-                if sno <= ss:
-                    with col:
-                        cevaplar[sno] = st.selectbox(f"Soru {sno}",["A","B","C","D","E"],key=f"ca{sno}")
+
+        with tab1:
+            st.caption("Her soru için doğru şıkkı seçin.")
+            for i in range(0, ss, 5):
+                cols = st.columns(5)
+                for j,col in enumerate(cols):
+                    sno = i+j+1
+                    if sno <= ss:
+                        with col:
+                            cevaplar[sno] = st.selectbox(f"Soru {sno}",["A","B","C","D","E"],key=f"ca{sno}")
+
+        with tab2:
+            # Örnek şablon indir
+            ornek_df = pd.DataFrame({"Soru No": range(1, ss+1), "Cevap": ["A"]*ss})
+            ornek_buf = BytesIO()
+            ornek_df.to_excel(ornek_buf, index=False, engine="openpyxl")
+            st.download_button("⬇️ Örnek Şablon İndir", ornek_buf.getvalue(),
+                               "ornek_cevap_anahtari.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.caption("A sütunu = Soru No, B sütunu = Cevap (A/B/C/D/E)")
+            yuklenen = st.file_uploader("CSV veya Excel Yükle", type=["csv","xlsx","xls"],
+                                        key="anahtar_yukle")
+            if yuklenen:
+                try:
+                    if yuklenen.name.endswith(".csv"):
+                        df_yukle = pd.read_csv(yuklenen, header=0)
+                    else:
+                        df_yukle = pd.read_excel(yuklenen, header=0, engine="openpyxl")
+                    df_yukle.columns = [str(c).strip() for c in df_yukle.columns]
+                    # İlk sütun soru no, ikinci sütun cevap
+                    for _, row in df_yukle.iterrows():
+                        try:
+                            sno = int(row.iloc[0])
+                            cvp = str(row.iloc[1]).strip().upper()
+                            if 1 <= sno <= ss and cvp in ["A","B","C","D","E"]:
+                                cevaplar[sno] = cvp
+                        except: pass
+                    st.success(f"{len(cevaplar)} soru yüklendi.")
+                    st.dataframe(pd.DataFrame([{"Soru":k,"Cevap":v} for k,v in sorted(cevaplar.items())]),
+                                 hide_index=True)
+                except Exception as e:
+                    st.error(f"Dosya okunamadı: {e}")
+
         if st.button("Anahtarı Kaydet", type="primary"):
             if adi:
                 con = db_bag()
@@ -745,7 +788,10 @@ else:
     _css_uygula()
     k = st.session_state.kullanici
     with st.sidebar:
-        st.markdown(f"### {k['tam_ad'] or k['kullanici_adi']}")
+        giris_saati = st.session_state.get("giris_saati", "")
+        st.markdown(f"### 👤 {k['tam_ad'] or k['kullanici_adi']}")
+        if giris_saati:
+            st.caption(f"Giriş: {giris_saati}")
         st.divider()
         sayfa = st.radio("Menü",[
             "🏠 Ana Sayfa",
