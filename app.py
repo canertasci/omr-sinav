@@ -18,6 +18,15 @@ ARUCO_DICT   = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 ARUCO_PARAMS = cv2.aruco.DetectorParameters()
 ARUCO_DETEK  = cv2.aruco.ArucoDetector(ARUCO_DICT, ARUCO_PARAMS)
 
+# ─── API KEY ─────────────────────────────────────────────────
+def _get_gemini_key():
+    """Gemini API key'i st.secrets veya env değişkeninden oku."""
+    try:
+        return st.secrets["GEMINI_API_KEY"]
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+    return os.getenv("GEMINI_API_KEY", "")
+
 # ─── VERİTABANI ─────────────────────────────────────────────
 def db_bag():
     return sqlite3.connect(DB_YOLU)
@@ -76,9 +85,34 @@ def db_olustur():
     )
     sifre = bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode()
     con.execute("INSERT OR IGNORE INTO kullanicilar (kullanici_adi,sifre_hash,tam_ad) VALUES (?,?,?)",
-                ("admin", sifre, "Yonetici"))
+                ("admin", sifre, "Yönetici"))
     con.commit()
     con.close()
+
+# ─── SİLME ONAY YARDIMCISI ──────────────────────────────────
+def _sil_butonu(btn_key, label="Sil"):
+    """Silme butonunu göster, tıklanınca session_state'e işaretle."""
+    if st.button(label, key=f"sil_btn_{btn_key}"):
+        st.session_state[f"sil_bekle_{btn_key}"] = True
+        st.rerun()
+
+def _sil_onay_goster(btn_key, isim="bu kayıt"):
+    """
+    Onay dialogunu göster.
+    Kullanıcı 'Evet, Sil' tıklarsa True döner.
+    İptal veya henüz onay gösterilmiyorsa False döner.
+    """
+    if not st.session_state.get(f"sil_bekle_{btn_key}", False):
+        return False
+    st.warning(f"⚠️ **{isim}** silinecek. Bu işlem geri alınamaz!")
+    c1, c2 = st.columns(2)
+    if c1.button("İptal", key=f"iptal_{btn_key}"):
+        st.session_state[f"sil_bekle_{btn_key}"] = False
+        st.rerun()
+    if c2.button("✓ Evet, Sil", key=f"onayla_{btn_key}"):
+        st.session_state[f"sil_bekle_{btn_key}"] = False
+        return True
+    return False
 
 # ─── GİRİŞ ──────────────────────────────────────────────────
 def giris_kontrol(adi, sifre):
@@ -95,23 +129,23 @@ def giris_sayfasi():
     .ana{text-align:center;color:#1a56db;font-size:2.5rem;font-weight:800;margin-top:3rem;}
     .alt{text-align:center;color:#6b7280;margin-bottom:2rem;}
     </style>
-    <div class="ana">📋 OMR Sinav Sistemi</div>
-    <div class="alt">Optik Isaretleme Okuyucu</div>
+    <div class="ana">📋 OMR Sınav Sistemi</div>
+    <div class="alt">Optik İşaretleme Okuyucu</div>
     """, unsafe_allow_html=True)
     _, orta, _ = st.columns([1,2,1])
     with orta:
         with st.container(border=True):
-            st.subheader("Giris Yap")
-            adi   = st.text_input("Kullanici Adi")
-            sifre = st.text_input("Sifre", type="password")
-            if st.button("Giris Yap", use_container_width=True, type="primary"):
+            st.subheader("Giriş Yap")
+            adi   = st.text_input("Kullanıcı Adı")
+            sifre = st.text_input("Şifre", type="password")
+            if st.button("Giriş Yap", use_container_width=True, type="primary"):
                 k = giris_kontrol(adi, sifre)
                 if k:
                     st.session_state.kullanici = k
                     st.rerun()
                 else:
-                    st.error("Kullanici adi veya sifre hatali!")
-            st.caption("Varsayilan: admin / admin123")
+                    st.error("Kullanıcı adı veya şifre hatalı!")
+            st.caption("Varsayılan: admin / admin123")
 
 # ─── OMR YARDIMCI FONKSİYONLAR ──────────────────────────────
 def pil_to_cv(img):
@@ -207,7 +241,7 @@ def kagit_oku_web(pil_img, cevap_anahtari, api_key, soru_sayisi=20):
     cv_img    = pil_to_cv(pil_img)
     markerlar = aruco_tespit(cv_img)
     if markerlar is None:
-        return None, "ArUco marker bulunamadi"
+        return None, "ArUco marker bulunamadı"
     bolgeler = bolgeleri_ayir(cv_img, markerlar)
     bilgi    = gemini_cagir_web(bolgeler[0], bilgi_prompt(), api_key)
     ad_soyad = bilgi.get("ad_soyad","?") if isinstance(bilgi,dict) and "hata" not in bilgi else "?"
@@ -240,7 +274,7 @@ def excel_ozet(sonuclar):
     beyaz = Font(color="FFFFFF", bold=True)
     kenar = Border(left=Side(style="thin"),right=Side(style="thin"),
                    top=Side(style="thin"),bottom=Side(style="thin"))
-    for j,b in enumerate(["Sayfa","Ad Soyad","Ogrenci No","Durum","Dogru","Yanlis","Bos","Puan"],1):
+    for j,b in enumerate(["Sayfa","Ad Soyad","Öğrenci No","Durum","Doğru","Yanlış","Boş","Puan"],1):
         h = ws.cell(row=1,column=j,value=b)
         h.fill=mavi; h.font=beyaz; h.alignment=Alignment(horizontal="center"); h.border=kenar
     for i,s in enumerate(sonuclar,2):
@@ -250,8 +284,8 @@ def excel_ozet(sonuclar):
             hc = ws.cell(row=i,column=j,value=d)
             hc.border=kenar; hc.alignment=Alignment(horizontal="center")
             durum = s.get("durum","")
-            if "Eslesme var" in durum: hc.fill=PatternFill("solid",fgColor="d1fae5")
-            elif "farkli" in durum:    hc.fill=PatternFill("solid",fgColor="fef3c7")
+            if "Eşleşme var" in durum: hc.fill=PatternFill("solid",fgColor="d1fae5")
+            elif "farklı" in durum:    hc.fill=PatternFill("solid",fgColor="fef3c7")
             elif "yok" in durum:       hc.fill=PatternFill("solid",fgColor="fee2e2")
     for col in ws.columns:
         ws.column_dimensions[col[0].column_letter].width=18
@@ -263,7 +297,7 @@ def excel_detay(sonuclar, cevap_anahtari, soru_sayisi=20):
     beyaz = Font(color="FFFFFF",bold=True)
     kenar = Border(left=Side(style="thin"),right=Side(style="thin"),
                    top=Side(style="thin"),bottom=Side(style="thin"))
-    basliklar = ["Ad Soyad","Ogrenci No"] + [f"S{i}" for i in range(1,soru_sayisi+1)]
+    basliklar = ["Ad Soyad","Öğrenci No"] + [f"S{i}" for i in range(1,soru_sayisi+1)]
     for j,b in enumerate(basliklar,1):
         h = ws.cell(row=1,column=j,value=b)
         h.fill=mavi; h.font=beyaz; h.alignment=Alignment(horizontal="center"); h.border=kenar
@@ -290,315 +324,343 @@ def excel_detay(sonuclar, cevap_anahtari, soru_sayisi=20):
 
 # ─── SAYFALAR ───────────────────────────────────────────────
 def sayfa_sablon():
-    st.header("Sablon Yonetimi")
+    st.header("Şablon Yönetimi")
     uid = st.session_state.kullanici["id"]
-    with st.container(border=True):
-        st.subheader("Yeni Sablon Ekle")
-        adi = st.text_input("Sablon Adi")
-        ss  = st.selectbox("Soru Sayisi", [10,20,30,40,50], index=1)
-        if st.button("Kaydet", type="primary"):
-            if adi:
-                con = db_bag()
-                con.execute("INSERT INTO sablonlar (kullanici_id,ad,soru_sayisi) VALUES (?,?,?)",(uid,adi,ss))
-                con.commit(); con.close()
-                st.success(f"'{adi}' kaydedildi!"); st.rerun()
-            else: st.warning("Sablon adi girin!")
-    st.subheader("Kayitli Sablonlar")
-    con = db_bag()
-    rows = con.execute("SELECT id,ad,soru_sayisi,tarih FROM sablonlar WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
-    con.close()
-    if rows:
-        for r in rows:
-            c1,c2,c3,c4 = st.columns([3,2,3,1])
-            c1.write(f"**{r[1]}**"); c2.write(f"{r[2]} soru"); c3.write(r[3][:16])
-            if c4.button("Sil",key=f"ds{r[0]}"):
-                con2=db_bag(); con2.execute("DELETE FROM sablonlar WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
-    else: st.info("Henuz sablon yok.")
+    try:
+        with st.container(border=True):
+            st.subheader("Yeni Şablon Ekle")
+            adi = st.text_input("Şablon Adı")
+            ss  = st.selectbox("Soru Sayısı", [10,20,30,40,50], index=1)
+            if st.button("Kaydet", type="primary"):
+                if adi:
+                    con = db_bag()
+                    con.execute("INSERT INTO sablonlar (kullanici_id,ad,soru_sayisi) VALUES (?,?,?)",(uid,adi,ss))
+                    con.commit(); con.close()
+                    st.success(f"'{adi}' kaydedildi!"); st.rerun()
+                else: st.warning("Şablon adı girin!")
+        st.subheader("Kayıtlı Şablonlar")
+        con = db_bag()
+        rows = con.execute("SELECT id,ad,soru_sayisi,tarih FROM sablonlar WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
+        con.close()
+        if rows:
+            for r in rows:
+                c1,c2,c3,c4 = st.columns([3,2,3,1])
+                c1.write(f"**{r[1]}**"); c2.write(f"{r[2]} soru"); c3.write(r[3][:16])
+                with c4:
+                    _sil_butonu(f"sablon_{r[0]}")
+                if _sil_onay_goster(f"sablon_{r[0]}", f"'{r[1]}'"):
+                    con2=db_bag(); con2.execute("DELETE FROM sablonlar WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+        else: st.info("Henüz şablon yok.")
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 def sayfa_anahtar():
-    st.header("Cevap Anahtari")
+    st.header("Cevap Anahtarı")
     uid = st.session_state.kullanici["id"]
-    con = db_bag()
-    sablonlar = con.execute("SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?",(uid,)).fetchall()
-    con.close()
-    if not sablonlar: st.warning("Once sablon ekleyin!"); return
-    sablon = st.selectbox("Sablon Sec", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
-    ss     = sablon[2]
-    adi    = st.text_input("Cevap Anahtari Adi (orn: Vize 2025)")
-    st.subheader("Cevaplari Sec")
-    cevaplar = {}
-    for i in range(0, ss, 5):
-        cols = st.columns(5)
-        for j,col in enumerate(cols):
-            sno = i+j+1
-            if sno <= ss:
-                with col:
-                    cevaplar[sno] = st.selectbox(f"Soru {sno}",["A","B","C","D","E"],key=f"ca{sno}")
-    if st.button("Anahtari Kaydet", type="primary"):
-        if adi:
-            con = db_bag()
-            con.execute("INSERT INTO cevap_anahtarlari (kullanici_id,sablon_id,ad,cevaplar) VALUES (?,?,?,?)",
-                        (uid,sablon[0],adi,json.dumps(cevaplar)))
-            con.commit(); con.close()
-            st.success(f"'{adi}' kaydedildi!")
-        else: st.warning("Cevap anahtari adi girin!")
-    st.subheader("Kayitli Anahtarlar")
-    con = db_bag()
-    rows = con.execute("SELECT id,ad,tarih FROM cevap_anahtarlari WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
-    con.close()
-    for r in rows:
-        c1,c2,c3 = st.columns([4,3,1])
-        c1.write(f"**{r[1]}**"); c2.write(r[2][:16])
-        if c3.button("Sil",key=f"da{r[0]}"):
-            con2=db_bag(); con2.execute("DELETE FROM cevap_anahtarlari WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+    try:
+        con = db_bag()
+        sablonlar = con.execute("SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?",(uid,)).fetchall()
+        con.close()
+        if not sablonlar: st.warning("Önce şablon ekleyin!"); return
+        sablon = st.selectbox("Şablon Seç", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
+        ss     = sablon[2]
+        adi    = st.text_input("Cevap Anahtarı Adı (örn: Vize 2025)")
+        st.subheader("Cevapları Seç")
+        cevaplar = {}
+        for i in range(0, ss, 5):
+            cols = st.columns(5)
+            for j,col in enumerate(cols):
+                sno = i+j+1
+                if sno <= ss:
+                    with col:
+                        cevaplar[sno] = st.selectbox(f"Soru {sno}",["A","B","C","D","E"],key=f"ca{sno}")
+        if st.button("Anahtarı Kaydet", type="primary"):
+            if adi:
+                con = db_bag()
+                con.execute("INSERT INTO cevap_anahtarlari (kullanici_id,sablon_id,ad,cevaplar) VALUES (?,?,?,?)",
+                            (uid,sablon[0],adi,json.dumps(cevaplar)))
+                con.commit(); con.close()
+                st.success(f"'{adi}' kaydedildi!")
+            else: st.warning("Cevap anahtarı adı girin!")
+        st.subheader("Kayıtlı Anahtarlar")
+        con = db_bag()
+        rows = con.execute("SELECT id,ad,tarih FROM cevap_anahtarlari WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
+        con.close()
+        for r in rows:
+            c1,c2,c3 = st.columns([4,3,1])
+            c1.write(f"**{r[1]}**"); c2.write(r[2][:16])
+            with c3:
+                _sil_butonu(f"anahtar_{r[0]}")
+            if _sil_onay_goster(f"anahtar_{r[0]}", f"'{r[1]}'"):
+                con2=db_bag(); con2.execute("DELETE FROM cevap_anahtarlari WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 def sayfa_liste():
-    st.header("Ogrenci Listesi")
+    st.header("Öğrenci Listesi")
     uid = st.session_state.kullanici["id"]
-    with st.container(border=True):
-        st.subheader("Excel Yukle")
-        st.caption("A sutunu = Ogrenci No | B sutunu = Ad Soyad")
-        adi      = st.text_input("Liste Adi")
-        yuklenen = st.file_uploader("Excel Dosyasi", type=["xlsx","xls"])
-        if yuklenen and adi and st.button("Listeyi Kaydet", type="primary"):
-            engine = "openpyxl" if yuklenen.name.endswith(".xlsx") else "xlrd"
-            df = pd.read_excel(yuklenen, header=None, engine=engine)
-            ogrenciler = [{"no":str(r[0]).strip(),"ad":str(r[1]).strip()} for _,r in df.iterrows()]
-            con = db_bag()
-            con.execute("INSERT INTO ogrenci_listeleri (kullanici_id,ad,ogrenciler) VALUES (?,?,?)",
-                        (uid,adi,json.dumps(ogrenciler,ensure_ascii=False)))
-            con.commit(); con.close()
-            st.success(f"{len(ogrenciler)} ogrenci kaydedildi!"); st.rerun()
-    st.subheader("Kayitli Listeler")
-    con = db_bag()
-    rows = con.execute("SELECT id,ad,ogrenciler,tarih FROM ogrenci_listeleri WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
-    con.close()
-    for r in rows:
-        og = json.loads(r[2])
-        c1,c2,c3,c4 = st.columns([3,2,3,1])
-        c1.write(f"**{r[1]}**"); c2.write(f"{len(og)} ogrenci"); c3.write(r[3][:16])
-        if c4.button("Sil",key=f"dl{r[0]}"):
-            con2=db_bag(); con2.execute("DELETE FROM ogrenci_listeleri WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+    try:
+        with st.container(border=True):
+            st.subheader("Excel Yükle")
+            st.caption("A sütunu = Öğrenci No | B sütunu = Ad Soyad")
+            adi      = st.text_input("Liste Adı")
+            yuklenen = st.file_uploader("Excel Dosyası", type=["xlsx","xls"])
+            if yuklenen and adi and st.button("Listeyi Kaydet", type="primary"):
+                engine = "openpyxl" if yuklenen.name.endswith(".xlsx") else "xlrd"
+                df = pd.read_excel(yuklenen, header=None, engine=engine)
+                ogrenciler = [{"no":str(r[0]).strip(),"ad":str(r[1]).strip()} for _,r in df.iterrows()]
+                con = db_bag()
+                con.execute("INSERT INTO ogrenci_listeleri (kullanici_id,ad,ogrenciler) VALUES (?,?,?)",
+                            (uid,adi,json.dumps(ogrenciler,ensure_ascii=False)))
+                con.commit(); con.close()
+                st.success(f"{len(ogrenciler)} öğrenci kaydedildi!"); st.rerun()
+        st.subheader("Kayıtlı Listeler")
+        con = db_bag()
+        rows = con.execute("SELECT id,ad,ogrenciler,tarih FROM ogrenci_listeleri WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
+        con.close()
+        for r in rows:
+            og = json.loads(r[2])
+            c1,c2,c3,c4 = st.columns([3,2,3,1])
+            c1.write(f"**{r[1]}**"); c2.write(f"{len(og)} öğrenci"); c3.write(r[3][:16])
+            with c4:
+                _sil_butonu(f"liste_{r[0]}")
+            if _sil_onay_goster(f"liste_{r[0]}", f"'{r[1]}'"):
+                con2=db_bag(); con2.execute("DELETE FROM ogrenci_listeleri WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 def sayfa_sinav():
-    st.header("Sinav Oku")
+    st.header("Sınav Oku")
     uid = st.session_state.kullanici["id"]
-    con = db_bag()
-    sablonlar  = con.execute("SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?",(uid,)).fetchall()
-    anahtarlar = con.execute("SELECT id,ad,sablon_id,cevaplar FROM cevap_anahtarlari WHERE kullanici_id=?",(uid,)).fetchall()
-    listeler   = con.execute("SELECT id,ad,ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?",(uid,)).fetchall()
-    con.close()
-    if not sablonlar or not anahtarlar:
-        st.warning("Once sablon ve cevap anahtari ekleyin!"); return
-    c1,c2 = st.columns(2)
-    with c1:
-        sablon  = st.selectbox("Sablon", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
-        anahtar = st.selectbox("Cevap Anahtari", anahtarlar, format_func=lambda x: x[1])
-    with c2:
-        liste   = st.selectbox("Ogrenci Listesi (opsiyonel)", [None]+list(listeler),
-                               format_func=lambda x: "Secme" if x is None else x[1])
-        api_key = st.text_input("Gemini API Key", type="password")
-    pdf = st.file_uploader("Sinav PDF", type=["pdf"])
-    if pdf and api_key and st.button("Sinavi Oku", type="primary", use_container_width=True):
-        anahtardict = {int(k):v for k,v in json.loads(anahtar[3]).items()}
-        ss          = sablon[2]
-        og_dict     = {}
-        if liste:
-            og_dict = {o["no"]:o["ad"] for o in json.loads(liste[2])}
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            f.write(pdf.read()); tmp = f.name
-        sayfalar = convert_from_path(tmp, dpi=TARAMA_DPI, poppler_path=POPPLER_PATH)
-        toplam   = len(sayfalar)
-        st.write(f"**{toplam} sayfa bulundu**")
-        prog     = st.progress(0)
-        durum    = st.empty()
-        sonuclar = []
-        for i,sayfa in enumerate(sayfalar,1):
-            if i > 1: time.sleep(1)
-            durum.write(f"Sayfa {i}/{toplam} okunuyor...")
-            s, hata = kagit_oku_web(sayfa, anahtardict, api_key, ss)
-            if hata:
-                sonuclar.append({"sayfa":i,"hata":hata,"durum":"Hata",
-                                  "ad_soyad":"?","ogrenci_no":"?","dogru":0,
-                                  "yanlis":0,"bos":ss,"puan":0,"cevaplar":{}})
-            else:
-                d = "Liste secilmedi"
-                if og_dict:
-                    no_e     = s["ogrenci_no"] in og_dict
-                    liste_ad = og_dict.get(s["ogrenci_no"],"").lower()
-                    ad_e     = any(p in liste_ad for p in s["ad_soyad"].lower().split() if len(p)>2)
-                    if no_e and ad_e:  d = "Eslesme var"
-                    elif no_e:         d = "No eslesti, ad farkli"
-                    elif ad_e:         d = "Ad eslesti, no farkli"
-                    else:              d = "Eslesme yok"
-                s["sayfa"] = i; s["durum"] = d
-                sonuclar.append(s)
-            prog.progress(i/toplam)
-        durum.empty()
-        # ── DB'ye kaydet ─────────────────────────────────────
-        basarili = sum(1 for s in sonuclar if not s.get("hata"))
+    try:
         con = db_bag()
-        cur = con.execute(
-            "INSERT INTO taramalar (kullanici_id,anahtar_id,anahtar_adi,sablon_adi,"
-            "soru_sayisi,cevap_anahtari,toplam_kagit,basarili) VALUES (?,?,?,?,?,?,?,?)",
-            (uid, anahtar[0], anahtar[1], sablon[1], ss,
-             json.dumps(anahtardict), toplam, basarili)
-        )
-        tarama_id = cur.lastrowid
-        for s in sonuclar:
-            con.execute(
-                "INSERT INTO tarama_sonuclari (tarama_id,sayfa,ad_soyad,ogrenci_no,"
-                "cevaplar,dogru,yanlis,bos,puan,durum,hata) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (tarama_id, s.get("sayfa"), s.get("ad_soyad","?"),
-                 s.get("ogrenci_no","?"), json.dumps(s.get("cevaplar",{})),
-                 s.get("dogru",0), s.get("yanlis",0), s.get("bos",0),
-                 s.get("puan",0), s.get("durum",""), s.get("hata"))
-            )
-        con.commit(); con.close()
-        st.session_state.sonuclar    = sonuclar
-        st.session_state.anahtardict = anahtardict
-        st.session_state.ss          = ss
-        st.success(f"{toplam} kagit okundu ve kaydedildi!"); st.rerun()
-    if "sonuclar" in st.session_state:
-        sonuclar    = st.session_state.sonuclar
-        anahtardict = st.session_state.anahtardict
-        ss          = st.session_state.ss
-        st.subheader("Sonuclar")
-        df_data = [{"Sayfa":s.get("sayfa"),"Ad Soyad":s.get("ad_soyad"),
-                    "No":s.get("ogrenci_no"),"Durum":s.get("durum"),
-                    "Dogru":s.get("dogru"),"Yanlis":s.get("yanlis"),
-                    "Puan":s.get("puan")} for s in sonuclar]
-        st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+        sablonlar  = con.execute("SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?",(uid,)).fetchall()
+        anahtarlar = con.execute("SELECT id,ad,sablon_id,cevaplar FROM cevap_anahtarlari WHERE kullanici_id=?",(uid,)).fetchall()
+        listeler   = con.execute("SELECT id,ad,ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?",(uid,)).fetchall()
+        con.close()
+        if not sablonlar or not anahtarlar:
+            st.warning("Önce şablon ve cevap anahtarı ekleyin!"); return
         c1,c2 = st.columns(2)
         with c1:
-            st.download_button("Ozet Excel Indir", excel_ozet(sonuclar),
-                               "ozet.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               use_container_width=True)
+            sablon  = st.selectbox("Şablon", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
+            anahtar = st.selectbox("Cevap Anahtarı", anahtarlar, format_func=lambda x: x[1])
         with c2:
-            st.download_button("Detay Excel Indir", excel_detay(sonuclar,anahtardict,ss),
-                               "detay.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               use_container_width=True)
+            liste = st.selectbox("Öğrenci Listesi (opsiyonel)", [None]+list(listeler),
+                                 format_func=lambda x: "Seçme" if x is None else x[1])
+            # API Key: secrets/env'den al, yoksa kullanıcıdan iste
+            _api_key_sabit = _get_gemini_key()
+            if _api_key_sabit:
+                api_key = _api_key_sabit
+                st.info("✅ Gemini API Key yapılandırılmış.")
+            else:
+                api_key = st.text_input("Gemini API Key", type="password",
+                                        placeholder="AIza...")
+        pdf = st.file_uploader("Sınav PDF", type=["pdf"])
+        if pdf and api_key and st.button("Sınavı Oku", type="primary", use_container_width=True):
+            anahtardict = {int(k):v for k,v in json.loads(anahtar[3]).items()}
+            ss          = sablon[2]
+            og_dict     = {}
+            if liste:
+                og_dict = {o["no"]:o["ad"] for o in json.loads(liste[2])}
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                f.write(pdf.read()); tmp = f.name
+            sayfalar = convert_from_path(tmp, dpi=TARAMA_DPI, poppler_path=POPPLER_PATH)
+            toplam   = len(sayfalar)
+            st.write(f"**{toplam} sayfa bulundu**")
+            prog     = st.progress(0)
+            durum    = st.empty()
+            sonuclar = []
+            for i,sayfa in enumerate(sayfalar,1):
+                if i > 1: time.sleep(1)
+                durum.write(f"Sayfa {i}/{toplam} okunuyor...")
+                s, hata = kagit_oku_web(sayfa, anahtardict, api_key, ss)
+                if hata:
+                    sonuclar.append({"sayfa":i,"hata":hata,"durum":"Hata",
+                                      "ad_soyad":"?","ogrenci_no":"?","dogru":0,
+                                      "yanlis":0,"bos":ss,"puan":0,"cevaplar":{}})
+                else:
+                    d = "Liste seçilmedi"
+                    if og_dict:
+                        no_e     = s["ogrenci_no"] in og_dict
+                        liste_ad = og_dict.get(s["ogrenci_no"],"").lower()
+                        ad_e     = any(p in liste_ad for p in s["ad_soyad"].lower().split() if len(p)>2)
+                        if no_e and ad_e:  d = "Eşleşme var"
+                        elif no_e:         d = "No eşleşti, ad farklı"
+                        elif ad_e:         d = "Ad eşleşti, no farklı"
+                        else:              d = "Eşleşme yok"
+                    s["sayfa"] = i; s["durum"] = d
+                    sonuclar.append(s)
+                prog.progress(i/toplam)
+            durum.empty()
+            basarili = sum(1 for s in sonuclar if not s.get("hata"))
+            con = db_bag()
+            cur = con.execute(
+                "INSERT INTO taramalar (kullanici_id,anahtar_id,anahtar_adi,sablon_adi,"
+                "soru_sayisi,cevap_anahtari,toplam_kagit,basarili) VALUES (?,?,?,?,?,?,?,?)",
+                (uid, anahtar[0], anahtar[1], sablon[1], ss,
+                 json.dumps(anahtardict), toplam, basarili)
+            )
+            tarama_id = cur.lastrowid
+            for s in sonuclar:
+                con.execute(
+                    "INSERT INTO tarama_sonuclari (tarama_id,sayfa,ad_soyad,ogrenci_no,"
+                    "cevaplar,dogru,yanlis,bos,puan,durum,hata) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (tarama_id, s.get("sayfa"), s.get("ad_soyad","?"),
+                     s.get("ogrenci_no","?"), json.dumps(s.get("cevaplar",{})),
+                     s.get("dogru",0), s.get("yanlis",0), s.get("bos",0),
+                     s.get("puan",0), s.get("durum",""), s.get("hata"))
+                )
+            con.commit(); con.close()
+            st.session_state.sonuclar    = sonuclar
+            st.session_state.anahtardict = anahtardict
+            st.session_state.ss          = ss
+            st.success(f"{toplam} kağıt okundu ve kaydedildi!"); st.rerun()
+        if "sonuclar" in st.session_state:
+            sonuclar    = st.session_state.sonuclar
+            anahtardict = st.session_state.anahtardict
+            ss          = st.session_state.ss
+            st.subheader("Sonuçlar")
+            df_data = [{"Sayfa":s.get("sayfa"),"Ad Soyad":s.get("ad_soyad"),
+                        "No":s.get("ogrenci_no"),"Durum":s.get("durum"),
+                        "Doğru":s.get("dogru"),"Yanlış":s.get("yanlis"),
+                        "Puan":s.get("puan")} for s in sonuclar]
+            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+            c1,c2 = st.columns(2)
+            with c1:
+                st.download_button("Özet Excel İndir", excel_ozet(sonuclar),
+                                   "ozet.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   use_container_width=True)
+            with c2:
+                st.download_button("Detay Excel İndir", excel_detay(sonuclar,anahtardict,ss),
+                                   "detay.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   use_container_width=True)
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 def sayfa_gecmis():
-    st.header("Gecmis Taramalar")
+    st.header("Geçmiş Taramalar")
     uid = st.session_state.kullanici["id"]
+    try:
+        con = db_bag()
+        taramalar = con.execute(
+            "SELECT id,anahtar_adi,sablon_adi,soru_sayisi,toplam_kagit,basarili,tarih "
+            "FROM taramalar WHERE kullanici_id=? ORDER BY id DESC", (uid,)
+        ).fetchall()
+        con.close()
 
-    con = db_bag()
-    taramalar = con.execute(
-        "SELECT id,anahtar_adi,sablon_adi,soru_sayisi,toplam_kagit,basarili,tarih "
-        "FROM taramalar WHERE kullanici_id=? ORDER BY id DESC", (uid,)
-    ).fetchall()
-    con.close()
+        if not taramalar:
+            st.info("Henüz kayıtlı tarama yok. 'Sınav Oku' sayfasından tarama yapabilirsiniz.")
+            return
 
-    if not taramalar:
-        st.info("Henuz kayitli tarama yok. 'Sinav Oku' sayfasindan tarama yapabilirsiniz.")
-        return
+        if "gecmis_secili" not in st.session_state:
+            st.session_state.gecmis_secili = None
 
-    # Secili tarama session'da sakla
-    if "gecmis_secili" not in st.session_state:
-        st.session_state.gecmis_secili = None
+        st.subheader(f"Toplam {len(taramalar)} tarama")
+        for t in taramalar:
+            tid, anahtar_adi, sablon_adi, ss, toplam, basarili, tarih = t
+            hata_sayisi = toplam - basarili
+            secili = st.session_state.gecmis_secili == tid
 
-    # ── Tarama listesi ──────────────────────────────────────
-    st.subheader(f"Toplam {len(taramalar)} tarama")
-    for t in taramalar:
-        tid, anahtar_adi, sablon_adi, ss, toplam, basarili, tarih = t
-        hata_sayisi = toplam - basarili
-        secili = st.session_state.gecmis_secili == tid
+            with st.container(border=True):
+                c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 1, 1])
+                c1.markdown(f"**{anahtar_adi}**  \n{sablon_adi} · {ss} soru")
+                c2.markdown(f"**{toplam}** kağıt  \n{basarili} başarılı" +
+                            (f", {hata_sayisi} hata" if hata_sayisi else ""))
+                c3.markdown(f"{tarih[:16]}")
+                if c4.button("Göster" if not secili else "Gizle", key=f"gos{tid}"):
+                    st.session_state.gecmis_secili = None if secili else tid
+                    st.rerun()
+                with c5:
+                    _sil_butonu(f"tarama_{tid}")
+                if _sil_onay_goster(f"tarama_{tid}", f"'{anahtar_adi}' taraması"):
+                    con2 = db_bag()
+                    con2.execute("DELETE FROM tarama_sonuclari WHERE tarama_id=?", (tid,))
+                    con2.execute("DELETE FROM taramalar WHERE id=?", (tid,))
+                    con2.commit(); con2.close()
+                    if st.session_state.gecmis_secili == tid:
+                        st.session_state.gecmis_secili = None
+                    st.rerun()
 
-        with st.container(border=True):
-            c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 1, 1])
-            c1.markdown(f"**{anahtar_adi}**  \n{sablon_adi} · {ss} soru")
-            c2.markdown(f"**{toplam}** kagit  \n{basarili} basarili" +
-                        (f", {hata_sayisi} hata" if hata_sayisi else ""))
-            c3.markdown(f"{tarih[:16]}")
-            if c4.button("Goster" if not secili else "Gizle", key=f"gos{tid}"):
-                st.session_state.gecmis_secili = None if secili else tid
-                st.rerun()
-            if c5.button("Sil", key=f"sil{tid}"):
-                con2 = db_bag()
-                con2.execute("DELETE FROM tarama_sonuclari WHERE tarama_id=?", (tid,))
-                con2.execute("DELETE FROM taramalar WHERE id=?", (tid,))
-                con2.commit(); con2.close()
-                if st.session_state.gecmis_secili == tid:
-                    st.session_state.gecmis_secili = None
-                st.rerun()
+            if secili:
+                con = db_bag()
+                row_t = con.execute(
+                    "SELECT cevap_anahtari FROM taramalar WHERE id=?", (tid,)
+                ).fetchone()
+                sonuclar_db = con.execute(
+                    "SELECT sayfa,ad_soyad,ogrenci_no,cevaplar,dogru,yanlis,bos,puan,durum,hata "
+                    "FROM tarama_sonuclari WHERE tarama_id=? ORDER BY sayfa", (tid,)
+                ).fetchall()
+                con.close()
 
-        # ── Secili taramanin detayi ─────────────────────────
-        if secili:
-            con = db_bag()
-            row_t = con.execute(
-                "SELECT cevap_anahtari FROM taramalar WHERE id=?", (tid,)
-            ).fetchone()
-            sonuclar_db = con.execute(
-                "SELECT sayfa,ad_soyad,ogrenci_no,cevaplar,dogru,yanlis,bos,puan,durum,hata "
-                "FROM tarama_sonuclari WHERE tarama_id=? ORDER BY sayfa", (tid,)
-            ).fetchall()
-            con.close()
+                anahtardict = {int(k): v for k, v in json.loads(row_t[0]).items()}
+                sonuclar = []
+                for r in sonuclar_db:
+                    sonuclar.append({
+                        "sayfa": r[0], "ad_soyad": r[1], "ogrenci_no": r[2],
+                        "cevaplar": {int(k): v for k, v in json.loads(r[3]).items()},
+                        "dogru": r[4], "yanlis": r[5], "bos": r[6],
+                        "puan": r[7], "durum": r[8], "hata": r[9],
+                    })
 
-            anahtardict = {int(k): v for k, v in json.loads(row_t[0]).items()}
-            sonuclar = []
-            for r in sonuclar_db:
-                sonuclar.append({
-                    "sayfa": r[0], "ad_soyad": r[1], "ogrenci_no": r[2],
-                    "cevaplar": {int(k): v for k, v in json.loads(r[3]).items()},
-                    "dogru": r[4], "yanlis": r[5], "bos": r[6],
-                    "puan": r[7], "durum": r[8], "hata": r[9],
-                })
+                df_data = [{"Sayfa": s["sayfa"], "Ad Soyad": s["ad_soyad"],
+                            "No": s["ogrenci_no"], "Durum": s["durum"],
+                            "Doğru": s["dogru"], "Yanlış": s["yanlis"], "Puan": s["puan"]}
+                           for s in sonuclar]
+                st.dataframe(pd.DataFrame(df_data), use_container_width=True)
 
-            df_data = [{"Sayfa": s["sayfa"], "Ad Soyad": s["ad_soyad"],
-                        "No": s["ogrenci_no"], "Durum": s["durum"],
-                        "Dogru": s["dogru"], "Yanlis": s["yanlis"], "Puan": s["puan"]}
-                       for s in sonuclar]
-            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
-
-            ec1, ec2 = st.columns(2)
-            with ec1:
-                st.download_button(
-                    "Ozet Excel", excel_ozet(sonuclar), f"ozet_{tid}.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, key=f"exc_ozet_{tid}"
-                )
-            with ec2:
-                st.download_button(
-                    "Detay Excel", excel_detay(sonuclar, anahtardict, ss), f"detay_{tid}.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, key=f"exc_detay_{tid}"
-                )
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    st.download_button(
+                        "Özet Excel", excel_ozet(sonuclar), f"ozet_{tid}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True, key=f"exc_ozet_{tid}"
+                    )
+                with ec2:
+                    st.download_button(
+                        "Detay Excel", excel_detay(sonuclar, anahtardict, ss), f"detay_{tid}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True, key=f"exc_detay_{tid}"
+                    )
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 def sayfa_kullanici():
-    st.header("Kullanici Yonetimi")
+    st.header("Kullanıcı Yönetimi")
     uid  = st.session_state.kullanici["id"]
     kadi = st.session_state.kullanici["kullanici_adi"]
-    with st.container(border=True):
-        st.subheader("Yeni Kullanici Ekle")
-        yadi = st.text_input("Kullanici Adi")
-        ytam = st.text_input("Ad Soyad")
-        ysif = st.text_input("Sifre", type="password")
-        if st.button("Kullanici Ekle", type="primary"):
-            if yadi and ysif:
-                try:
-                    sh = bcrypt.hashpw(ysif.encode(),bcrypt.gensalt()).decode()
+    try:
+        with st.container(border=True):
+            st.subheader("Yeni Kullanıcı Ekle")
+            yadi = st.text_input("Kullanıcı Adı")
+            ytam = st.text_input("Ad Soyad")
+            ysif = st.text_input("Şifre", type="password")
+            if st.button("Kullanıcı Ekle", type="primary"):
+                if yadi and ysif:
+                    try:
+                        sh = bcrypt.hashpw(ysif.encode(),bcrypt.gensalt()).decode()
+                        con = db_bag()
+                        con.execute("INSERT INTO kullanicilar (kullanici_adi,sifre_hash,tam_ad) VALUES (?,?,?)",(yadi,sh,ytam))
+                        con.commit(); con.close()
+                        st.success(f"'{yadi}' eklendi!")
+                    except: st.error("Bu kullanıcı adı zaten var!")
+                else: st.warning("Kullanıcı adı ve şifre gerekli!")
+        with st.container(border=True):
+            st.subheader("Şifre Değiştir")
+            eski = st.text_input("Mevcut Şifre", type="password")
+            yeni = st.text_input("Yeni Şifre", type="password")
+            if st.button("Şifreyi Değiştir"):
+                if giris_kontrol(kadi, eski):
+                    sh = bcrypt.hashpw(yeni.encode(),bcrypt.gensalt()).decode()
                     con = db_bag()
-                    con.execute("INSERT INTO kullanicilar (kullanici_adi,sifre_hash,tam_ad) VALUES (?,?,?)",(yadi,sh,ytam))
+                    con.execute("UPDATE kullanicilar SET sifre_hash=? WHERE id=?",(sh,uid))
                     con.commit(); con.close()
-                    st.success(f"'{yadi}' eklendi!")
-                except: st.error("Bu kullanici adi zaten var!")
-            else: st.warning("Kullanici adi ve sifre gerekli!")
-    with st.container(border=True):
-        st.subheader("Sifre Degistir")
-        eski = st.text_input("Mevcut Sifre", type="password")
-        yeni = st.text_input("Yeni Sifre", type="password")
-        if st.button("Sifreyi Degistir"):
-            if giris_kontrol(kadi, eski):
-                sh = bcrypt.hashpw(yeni.encode(),bcrypt.gensalt()).decode()
-                con = db_bag()
-                con.execute("UPDATE kullanicilar SET sifre_hash=? WHERE id=?",(sh,uid))
-                con.commit(); con.close()
-                st.success("Sifre degistirildi!")
-            else: st.error("Mevcut sifre hatali!")
+                    st.success("Şifre değiştirildi!")
+                else: st.error("Mevcut şifre hatalı!")
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 # ─── ANA UYGULAMA ────────────────────────────────────────────
-st.set_page_config(page_title="OMR Sinav Sistemi", page_icon="📋",
+st.set_page_config(page_title="OMR Sınav Sistemi", page_icon="📋",
                    layout="wide", initial_sidebar_state="expanded")
 db_olustur()
 
@@ -609,22 +671,22 @@ else:
     with st.sidebar:
         st.markdown(f"### {k['tam_ad'] or k['kullanici_adi']}")
         st.divider()
-        sayfa = st.radio("Menu",[
-            "Sablon Yonetimi",
-            "Cevap Anahtari",
-            "Ogrenci Listesi",
-            "Sinav Oku",
-            "Gecmis Taramalar",
-            "Kullanici Yonetimi",
+        sayfa = st.radio("Menü",[
+            "Şablon Yönetimi",
+            "Cevap Anahtarı",
+            "Öğrenci Listesi",
+            "Sınav Oku",
+            "Geçmiş Taramalar",
+            "Kullanıcı Yönetimi",
         ])
         st.divider()
-        if st.button("Cikis Yap"):
+        if st.button("Çıkış Yap"):
             del st.session_state.kullanici
             st.rerun()
 
-    if   sayfa == "Sablon Yonetimi":    sayfa_sablon()
-    elif sayfa == "Cevap Anahtari":     sayfa_anahtar()
-    elif sayfa == "Ogrenci Listesi":    sayfa_liste()
-    elif sayfa == "Sinav Oku":          sayfa_sinav()
-    elif sayfa == "Gecmis Taramalar":   sayfa_gecmis()
-    elif sayfa == "Kullanici Yonetimi": sayfa_kullanici()
+    if   sayfa == "Şablon Yönetimi":    sayfa_sablon()
+    elif sayfa == "Cevap Anahtarı":     sayfa_anahtar()
+    elif sayfa == "Öğrenci Listesi":    sayfa_liste()
+    elif sayfa == "Sınav Oku":          sayfa_sinav()
+    elif sayfa == "Geçmiş Taramalar":   sayfa_gecmis()
+    elif sayfa == "Kullanıcı Yönetimi": sayfa_kullanici()
