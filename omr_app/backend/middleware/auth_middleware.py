@@ -6,6 +6,7 @@ test için sabit bir uid döndürülür.
 """
 from __future__ import annotations
 
+import base64
 import os
 import json
 from functools import lru_cache
@@ -22,10 +23,14 @@ def _init_firebase() -> None:
     if _firebase_initialized:
         return
 
-    # Önce JSON string'i dene (Railway/Render ortam değişkeni)
-    sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-    if sa_json:
-        sa_dict = json.loads(sa_json)
+    # 1) Base64 encoded JSON (Railway için önerilen yöntem)
+    sa_b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64")
+    if sa_b64:
+        sa_dict = json.loads(base64.b64decode(sa_b64).decode())
+        cred = credentials.Certificate(sa_dict)
+    # 2) Düz JSON string
+    elif os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON"):
+        sa_dict = json.loads(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON"))
         cred = credentials.Certificate(sa_dict)
     else:
         # Dosya yolundan yükle (lokal geliştirme)
