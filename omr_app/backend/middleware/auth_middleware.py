@@ -9,13 +9,16 @@ from __future__ import annotations
 import base64
 import os
 import json
-from functools import lru_cache
 
 import firebase_admin
 from firebase_admin import auth, credentials
 from fastapi import Header, HTTPException
 
 _firebase_initialized = False
+
+# Modül yüklenirken bir kez hesapla + logla
+_SKIP = os.getenv("SKIP_AUTH", "false").strip().lower() in ("true", "1", "yes")
+print(f"[AUTH] SKIP_AUTH env='{os.getenv('SKIP_AUTH', 'NOT_SET')}' → bypass={_SKIP}")
 
 
 def _init_firebase() -> None:
@@ -48,18 +51,19 @@ def _init_firebase() -> None:
 
 
 async def verify_firebase_token(
-    authorization: str = Header(..., description="Bearer <firebase_id_token>"),
+    authorization: str = Header(None, description="Bearer <firebase_id_token>"),
 ) -> dict:
     """
     FastAPI Dependency — korumalı route'larda kullanılır.
 
     Döner: {"uid": "...", "email": "...", ...}
     """
-    # Geliştirme modu: auth'u atla
-    if os.getenv("SKIP_AUTH", "false").lower() == "true":
+    # Hem modül-level hem runtime kontrol (Railway geç inject edebilir)
+    skip = _SKIP or os.getenv("SKIP_AUTH", "false").strip().lower() in ("true", "1", "yes")
+    if skip:
         return {"uid": "dev_user_001", "email": "dev@example.com"}
 
-    if not authorization.startswith("Bearer "):
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=401,
             detail="Geçersiz token formatı. 'Bearer <token>' formatında olmalı.",
