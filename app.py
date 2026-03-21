@@ -931,6 +931,36 @@ else:
     _css_uygula()
     k = st.session_state.kullanici
     with st.sidebar:
+        st.sidebar.markdown("""
+<div style="
+    background: linear-gradient(135deg, #185FA5, #378ADD);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div>
+            <div style="color:white; font-size:16px; font-weight:700; line-height:1.2;">Akademisyen</div>
+            <div style="color:#FCDE5A; font-size:24px; font-weight:700; line-height:1.2;">AI</div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3,14px); gap:5px;">
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.25)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.25)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:#FCDE5A"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.9)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.25)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.25)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.25)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.25)"></div>
+            <div style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.9)"></div>
+        </div>
+    </div>
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.2);margin:10px 0 6px;">
+    <div style="color:rgba(255,255,255,0.7);font-size:9px;letter-spacing:1px;">
+        YALOVA ÜNİVERSİTESİ · OMR SİSTEMİ
+    </div>
+</div>
+""", unsafe_allow_html=True)
         st.markdown("""
         <div style="text-align:center;padding:1.2rem 0 0.5rem;">
             <div style="font-size:1.7rem;font-weight:900;letter-spacing:-0.5px;">🎓 ÖğretmenAI</div>
