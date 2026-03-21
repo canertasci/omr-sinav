@@ -470,15 +470,53 @@ def sayfa_anahtar():
             else: st.warning("Cevap anahtarı adı girin!")
         st.subheader("Kayıtlı Anahtarlar")
         con = db_bag()
-        rows = con.execute("SELECT id,ad,tarih FROM cevap_anahtarlari WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
+        rows = con.execute("SELECT id,ad,sablon_id,cevaplar,tarih FROM cevap_anahtarlari WHERE kullanici_id=? ORDER BY id DESC",(uid,)).fetchall()
         con.close()
         for r in rows:
-            c1,c2,c3 = st.columns([4,3,1])
-            c1.write(f"**{r[1]}**"); c2.write(r[2][:16])
-            with c3:
+            c1,c2,c3,c4 = st.columns([4,2,1,1])
+            c1.write(f"**{r[1]}**"); c2.write(r[4][:16])
+            duzenle_key = f"duzenle_{r[0]}"
+            if c3.button("✏️", key=f"btn_{duzenle_key}", help="Düzenle"):
+                st.session_state[duzenle_key] = not st.session_state.get(duzenle_key, False)
+                st.rerun()
+            with c4:
                 _sil_butonu(f"anahtar_{r[0]}")
             if _sil_onay_goster(f"anahtar_{r[0]}", f"'{r[1]}'"):
                 con2=db_bag(); con2.execute("DELETE FROM cevap_anahtarlari WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+
+            # Düzenleme paneli
+            if st.session_state.get(duzenle_key, False):
+                mevcut = {int(k):v for k,v in json.loads(r[3]).items()}
+                # Şablonun soru sayısını bul
+                con3 = db_bag()
+                sablon_row = con3.execute("SELECT soru_sayisi FROM sablonlar WHERE id=?", (r[2],)).fetchone()
+                con3.close()
+                edit_ss = sablon_row[0] if sablon_row else len(mevcut)
+                with st.container(border=True):
+                    st.markdown(f"**✏️ Düzenleniyor: {r[1]}**")
+                    yeni_cevaplar = {}
+                    for i in range(0, edit_ss, 5):
+                        cols = st.columns(5)
+                        for j, col in enumerate(cols):
+                            sno = i+j+1
+                            if sno <= edit_ss:
+                                with col:
+                                    varsayilan = ["A","B","C","D","E"].index(mevcut.get(sno,"A"))
+                                    yeni_cevaplar[sno] = st.selectbox(
+                                        f"Soru {sno}", ["A","B","C","D","E"],
+                                        index=varsayilan, key=f"edit_{r[0]}_{sno}"
+                                    )
+                    col_kaydet, col_iptal = st.columns(2)
+                    if col_kaydet.button("💾 Kaydet", key=f"kaydet_{r[0]}", type="primary"):
+                        con4 = db_bag()
+                        con4.execute("UPDATE cevap_anahtarlari SET cevaplar=? WHERE id=?",
+                                     (json.dumps(yeni_cevaplar), r[0]))
+                        con4.commit(); con4.close()
+                        st.session_state[duzenle_key] = False
+                        st.success("Güncellendi!"); st.rerun()
+                    if col_iptal.button("İptal", key=f"iptal_edit_{r[0]}"):
+                        st.session_state[duzenle_key] = False
+                        st.rerun()
     except Exception as e:
         st.error(f"Hata: {e}")
 
