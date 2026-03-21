@@ -23,8 +23,10 @@ ARUCO_DETEK  = cv2.aruco.ArucoDetector(ARUCO_DICT, ARUCO_PARAMS)
 def _get_gemini_key():
     """Gemini API key'i st.secrets veya env değişkeninden oku."""
     try:
-        return st.secrets["GEMINI_API_KEY"]
-    except (KeyError, FileNotFoundError, AttributeError):
+        key = st.secrets.get("GEMINI_API_KEY", "")
+        if key:
+            return key
+    except Exception:
         pass
     return os.getenv("GEMINI_API_KEY", "")
 
@@ -127,11 +129,13 @@ def giris_kontrol(adi, sifre):
 def giris_sayfasi():
     st.markdown("""
     <style>
-    .ana{text-align:center;color:#1a56db;font-size:2.5rem;font-weight:800;margin-top:3rem;}
-    .alt{text-align:center;color:#6b7280;margin-bottom:2rem;}
+    .ana{text-align:center;color:#1a237e;font-size:2.8rem;font-weight:900;margin-top:3rem;letter-spacing:-1px;}
+    .alt{text-align:center;color:#5c6bc0;font-size:1rem;margin-top:4px;}
+    .uni{text-align:center;color:#9e9e9e;font-size:0.85rem;margin-bottom:2rem;}
     </style>
-    <div class="ana">📋 OMR Sınav Sistemi</div>
-    <div class="alt">Optik İşaretleme Okuyucu</div>
+    <div class="ana">🎓 ÖğretmenAI</div>
+    <div class="alt">Sınav Değerlendirme Sistemi</div>
+    <div class="uni">Yalova Üniversitesi</div>
     """, unsafe_allow_html=True)
     _, orta, _ = st.columns([1,2,1])
     with orta:
@@ -328,9 +332,58 @@ def excel_detay(sonuclar, cevap_anahtari, soru_sayisi=20):
 def _css_uygula():
     st.markdown("""
     <style>
-    /* Sil onay butonu kırmızı */
-    div[data-testid="stButton"] button[kind="secondary"] { border-color: #e53e3e; color: #e53e3e; }
-    div[data-testid="stButton"] button[kind="secondary"]:hover { background-color: #fff5f5; }
+    /* ─── Sidebar: koyu mavi ─── */
+    section[data-testid="stSidebar"] > div:first-child {
+        background: linear-gradient(180deg, #1a237e 0%, #283593 100%);
+    }
+    section[data-testid="stSidebar"] .stMarkdown p,
+    section[data-testid="stSidebar"] .stCaption p,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] small,
+    section[data-testid="stSidebar"] label { color: white !important; }
+    section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.25) !important; }
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+        color: white !important; padding: 4px 8px; border-radius: 6px; transition: background 0.15s;
+    }
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:hover {
+        background: rgba(255,255,255,0.15) !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button {
+        background: rgba(255,255,255,0.15) !important;
+        border: 1px solid rgba(255,255,255,0.35) !important;
+        color: white !important; border-radius: 8px !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(255,255,255,0.28) !important;
+    }
+    /* ─── Primary buttons: yeşil ─── */
+    .stButton > button[kind="primary"],
+    .stButton > button[kind="primaryFormSubmit"] {
+        background: #2E7D32 !important;
+        border-color: #2E7D32 !important;
+        color: white !important; border-radius: 8px !important;
+    }
+    .stButton > button[kind="primary"]:hover { background: #1B5E20 !important; }
+    /* ─── Secondary/sil buttons: kırmızı ─── */
+    div[data-testid="stButton"] button[kind="secondary"] {
+        border-color: #C62828 !important; color: #C62828 !important; border-radius: 8px !important;
+    }
+    div[data-testid="stButton"] button[kind="secondary"]:hover {
+        background: #FFEBEE !important; color: #B71C1C !important;
+    }
+    /* ─── Metric kartları ─── */
+    [data-testid="metric-container"] {
+        background: white; border: 1px solid #e8eaf6; border-radius: 12px;
+        padding: 16px 20px; box-shadow: 0 2px 8px rgba(26,35,126,0.09);
+    }
+    [data-testid="metric-container"] [data-testid="stMetricLabel"] { color: #5c6bc0 !important; }
+    [data-testid="metric-container"] [data-testid="stMetricValue"] {
+        color: #1a237e !important; font-weight: 700 !important;
+    }
+    /* ─── Genel ─── */
+    .stApp { background: #f5f6fa; }
+    h1, h2, h3 { color: #1a237e !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -342,8 +395,10 @@ def _dashboard_verileri(uid):
     tarama_sayisi = con.execute("SELECT COUNT(*) FROM taramalar WHERE kullanici_id=?", (uid,)).fetchone()[0]
     listeler      = con.execute("SELECT ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?", (uid,)).fetchall()
     son_taramalar = con.execute(
-        "SELECT anahtar_adi,sablon_adi,toplam_kagit,basarili,tarih "
-        "FROM taramalar WHERE kullanici_id=? ORDER BY id DESC LIMIT 5", (uid,)
+        "SELECT t.anahtar_adi, t.sablon_adi, t.toplam_kagit, t.basarili, t.tarih, "
+        "ROUND(COALESCE(AVG(s.puan),0),1) "
+        "FROM taramalar t LEFT JOIN tarama_sonuclari s ON t.id=s.tarama_id "
+        "WHERE t.kullanici_id=? GROUP BY t.id ORDER BY t.id DESC LIMIT 5", (uid,)
     ).fetchall()
     con.close()
     ogrenci_sayisi = sum(len(json.loads(r[0])) for r in listeler)
@@ -351,19 +406,24 @@ def _dashboard_verileri(uid):
 
 def sayfa_anasayfa():
     st.header("Ana Sayfa")
+    st.divider()
     uid = st.session_state.kullanici["id"]
     try:
         sablon_sayisi, tarama_sayisi, ogrenci_sayisi, son_taramalar = _dashboard_verileri(uid)
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("📐 Şablon Sayısı", sablon_sayisi)
-        c2.metric("👥 Toplam Öğrenci", ogrenci_sayisi)
-        c3.metric("📊 Toplam Tarama", tarama_sayisi)
+        c1.metric("📐 Şablon Sayısı", sablon_sayisi,
+                  help="Oluşturduğunuz sınav şablonlarının sayısı (10/20/30/40/50 soruluk)")
+        c2.metric("👥 Toplam Öğrenci", ogrenci_sayisi,
+                  help="Tüm öğrenci listelerindeki toplam kayıtlı öğrenci sayısı")
+        c3.metric("📊 Toplam Tarama", tarama_sayisi,
+                  help="Şimdiye kadar gerçekleştirilen toplam sınav taraması sayısı")
 
+        st.divider()
         st.subheader("Son 5 Tarama")
         if son_taramalar:
             df = pd.DataFrame(son_taramalar,
-                              columns=["Cevap Anahtarı","Şablon","Toplam Kağıt","Başarılı","Tarih"])
+                              columns=["Cevap Anahtarı","Şablon","Toplam Kağıt","Başarılı","Tarih","Ort. Puan"])
             df["Tarih"] = df["Tarih"].str[:16]
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
@@ -374,6 +434,7 @@ def sayfa_anasayfa():
 # ─── SAYFALAR ───────────────────────────────────────────────
 def sayfa_sablon():
     st.header("Şablon Yönetimi")
+    st.divider()
     uid = st.session_state.kullanici["id"]
     try:
         with st.container(border=True):
@@ -394,7 +455,7 @@ def sayfa_sablon():
         if rows:
             for r in rows:
                 c1,c2,c3,c4 = st.columns([3,2,3,1])
-                c1.write(f"**{r[1]}**"); c2.write(f"{r[2]} soru"); c3.write(r[3][:16])
+                c1.markdown(f"**{r[1]}**"); c2.write(f"{r[2]} soru"); c3.write(r[3][:16])
                 with c4:
                     _sil_butonu(f"sablon_{r[0]}")
                 if _sil_onay_goster(f"sablon_{r[0]}", f"'{r[1]}'"):
@@ -405,6 +466,7 @@ def sayfa_sablon():
 
 def sayfa_anahtar():
     st.header("Cevap Anahtarı")
+    st.divider()
     uid = st.session_state.kullanici["id"]
     try:
         con = db_bag()
@@ -522,11 +584,22 @@ def sayfa_anahtar():
 
 def sayfa_liste():
     st.header("Öğrenci Listesi")
+    st.divider()
     uid = st.session_state.kullanici["id"]
     try:
         with st.container(border=True):
             st.subheader("Excel Yükle")
-            st.caption("A sütunu = Öğrenci No | B sütunu = Ad Soyad")
+            st.info("📋 **Excel formatı:** Başlık satırı olmadan, **A sütunu** = Öğrenci No, **B sütunu** = Ad Soyad")
+            ornek_og = pd.DataFrame([
+                {"Öğrenci No": "22010001", "Ad Soyad": "Ali Yılmaz"},
+                {"Öğrenci No": "22010002", "Ad Soyad": "Ayşe Kaya"},
+            ])
+            ornek_buf = BytesIO()
+            ornek_og.to_excel(ornek_buf, index=False, header=False, engine="openpyxl")
+            st.download_button("⬇️ Örnek Excel Şablonu İndir", ornek_buf.getvalue(),
+                               "ornek_ogrenci_listesi.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               key="ornek_og_indir")
             adi      = st.text_input("Liste Adı")
             yuklenen = st.file_uploader("Excel Dosyası", type=["xlsx","xls"])
             if yuklenen and adi and st.button("Listeyi Kaydet", type="primary"):
@@ -545,7 +618,7 @@ def sayfa_liste():
         for r in rows:
             og = json.loads(r[2])
             c1,c2,c3,c4,c5 = st.columns([3,2,2,1,1])
-            c1.write(f"**{r[1]}**"); c2.write(f"{len(og)} öğrenci"); c3.write(r[3][:16])
+            c1.markdown(f"**{r[1]}**"); c2.write(f"{len(og)} öğrenci"); c3.write(r[3][:16])
             goruntu_key = f"goruntu_{r[0]}"
             if c4.button("👁️", key=f"btn_{goruntu_key}", help="Görüntüle"):
                 st.session_state[goruntu_key] = not st.session_state.get(goruntu_key, False)
@@ -571,6 +644,7 @@ def sayfa_liste():
 
 def sayfa_sinav():
     st.header("Sınav Oku")
+    st.divider()
     uid = st.session_state.kullanici["id"]
     try:
         con = db_bag()
@@ -614,33 +688,35 @@ def sayfa_sinav():
                 og_dict = {o["no"]:o["ad"] for o in json.loads(liste[2])}
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
                 f.write(pdf.read()); tmp = f.name
-            sayfalar = convert_from_path(tmp, dpi=TARAMA_DPI, poppler_path=POPPLER_PATH)
+            with st.spinner("PDF dönüştürülüyor..."):
+                sayfalar = convert_from_path(tmp, dpi=TARAMA_DPI, poppler_path=POPPLER_PATH)
             toplam   = len(sayfalar)
             st.write(f"**{toplam} sayfa bulundu**")
             prog     = st.progress(0)
             durum    = st.empty()
             sonuclar = []
-            for i,sayfa in enumerate(sayfalar,1):
-                if i > 1: time.sleep(1)
-                durum.write(f"Sayfa {i}/{toplam} okunuyor...")
-                s, hata = kagit_oku_web(sayfa, anahtardict, api_key, ss)
-                if hata:
-                    sonuclar.append({"sayfa":i,"hata":hata,"durum":"Hata",
-                                      "ad_soyad":"?","ogrenci_no":"?","dogru":0,
-                                      "yanlis":0,"bos":ss,"puan":0,"cevaplar":{}})
-                else:
-                    d = "Liste seçilmedi"
-                    if og_dict:
-                        no_e     = s["ogrenci_no"] in og_dict
-                        liste_ad = og_dict.get(s["ogrenci_no"],"").lower()
-                        ad_e     = any(p in liste_ad for p in s["ad_soyad"].lower().split() if len(p)>2)
-                        if no_e and ad_e:  d = "Eşleşme var"
-                        elif no_e:         d = "No eşleşti, ad farklı"
-                        elif ad_e:         d = "Ad eşleşti, no farklı"
-                        else:              d = "Eşleşme yok"
-                    s["sayfa"] = i; s["durum"] = d
-                    sonuclar.append(s)
-                prog.progress(i/toplam)
+            with st.spinner("Sayfalar Gemini ile okunuyor..."):
+                for i,sayfa in enumerate(sayfalar,1):
+                    if i > 1: time.sleep(1)
+                    durum.write(f"Sayfa {i}/{toplam} okunuyor...")
+                    s, hata = kagit_oku_web(sayfa, anahtardict, api_key, ss)
+                    if hata:
+                        sonuclar.append({"sayfa":i,"hata":hata,"durum":"Hata",
+                                          "ad_soyad":"?","ogrenci_no":"?","dogru":0,
+                                          "yanlis":0,"bos":ss,"puan":0,"cevaplar":{}})
+                    else:
+                        d = "Liste seçilmedi"
+                        if og_dict:
+                            no_e     = s["ogrenci_no"] in og_dict
+                            liste_ad = og_dict.get(s["ogrenci_no"],"").lower()
+                            ad_e     = any(p in liste_ad for p in s["ad_soyad"].lower().split() if len(p)>2)
+                            if no_e and ad_e:  d = "Eşleşme var"
+                            elif no_e:         d = "No eşleşti, ad farklı"
+                            elif ad_e:         d = "Ad eşleşti, no farklı"
+                            else:              d = "Eşleşme yok"
+                        s["sayfa"] = i; s["durum"] = d
+                        sonuclar.append(s)
+                    prog.progress(i/toplam)
             durum.empty()
             basarili = sum(1 for s in sonuclar if not s.get("hata"))
             con = db_bag()
@@ -689,6 +765,7 @@ def sayfa_sinav():
 
 def sayfa_gecmis():
     st.header("Geçmiş Taramalar")
+    st.divider()
     uid = st.session_state.kullanici["id"]
     try:
         con = db_bag()
@@ -712,7 +789,8 @@ def sayfa_gecmis():
                 sablon_adlari = sorted({t[2] for t in taramalar})
                 secili_sablon = st.selectbox("Şablon Adı", ["Tümü"] + sablon_adlari)
             with fc2:
-                tarih_filtre = st.text_input("Tarih içerir (örn: 2025-06)", "")
+                tarih_sec = st.date_input("Tarih Filtresi", value=None, key="gcm_tarih")
+                tarih_filtre = tarih_sec.strftime("%Y-%m") if tarih_sec else ""
 
         if secili_sablon != "Tümü":
             taramalar = [t for t in taramalar if t[2] == secili_sablon]
@@ -808,6 +886,7 @@ def sayfa_gecmis():
 
 def sayfa_kullanici():
     st.header("Kullanıcı Yönetimi")
+    st.divider()
     uid  = st.session_state.kullanici["id"]
     kadi = st.session_state.kullanici["kullanici_adi"]
     try:
@@ -842,7 +921,7 @@ def sayfa_kullanici():
         st.error(f"Hata: {e}")
 
 # ─── ANA UYGULAMA ────────────────────────────────────────────
-st.set_page_config(page_title="OMR Sınav Sistemi", page_icon="📋",
+st.set_page_config(page_title="ÖğretmenAI | OMR Sistemi", page_icon="🎓",
                    layout="wide", initial_sidebar_state="expanded")
 db_olustur()
 
@@ -852,12 +931,21 @@ else:
     _css_uygula()
     k = st.session_state.kullanici
     with st.sidebar:
-        giris_saati = st.session_state.get("giris_saati", "")
-        st.markdown(f"### 👤 {k['tam_ad'] or k['kullanici_adi']}")
-        if giris_saati:
-            st.caption(f"Giriş: {giris_saati}")
+        st.markdown("""
+        <div style="text-align:center;padding:1.2rem 0 0.5rem;">
+            <div style="font-size:1.7rem;font-weight:900;letter-spacing:-0.5px;">🎓 ÖğretmenAI</div>
+            <div style="font-size:0.72rem;opacity:0.85;margin-top:3px;">Sınav Değerlendirme Sistemi</div>
+            <div style="font-size:0.68rem;opacity:0.65;margin-top:2px;">Yalova Üniversitesi</div>
+        </div>
+        """, unsafe_allow_html=True)
         st.divider()
-        sayfa = st.radio("Menü",[
+        tam_ad = k['tam_ad'] or k['kullanici_adi']
+        giris_saati = st.session_state.get("giris_saati", "")
+        st.markdown(f"**👤 {tam_ad}**")
+        if giris_saati:
+            st.caption(f"🕐 Giriş: {giris_saati}")
+        st.divider()
+        sayfa = st.radio("Menü", [
             "🏠 Ana Sayfa",
             "📐 Şablon Yönetimi",
             "🔑 Cevap Anahtarı",
@@ -865,9 +953,9 @@ else:
             "📋 Sınav Oku",
             "📊 Geçmiş Taramalar",
             "⚙️ Kullanıcı Yönetimi",
-        ])
+        ], label_visibility="collapsed")
         st.divider()
-        if st.button("Çıkış Yap"):
+        if st.button("🚪 Çıkış Yap", use_container_width=True):
             del st.session_state.kullanici
             st.rerun()
 
