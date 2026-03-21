@@ -544,12 +544,28 @@ def sayfa_liste():
         con.close()
         for r in rows:
             og = json.loads(r[2])
-            c1,c2,c3,c4 = st.columns([3,2,3,1])
+            c1,c2,c3,c4,c5 = st.columns([3,2,2,1,1])
             c1.write(f"**{r[1]}**"); c2.write(f"{len(og)} öğrenci"); c3.write(r[3][:16])
-            with c4:
+            goruntu_key = f"goruntu_{r[0]}"
+            if c4.button("👁️", key=f"btn_{goruntu_key}", help="Görüntüle"):
+                st.session_state[goruntu_key] = not st.session_state.get(goruntu_key, False)
+                st.rerun()
+            with c5:
                 _sil_butonu(f"liste_{r[0]}")
             if _sil_onay_goster(f"liste_{r[0]}", f"'{r[1]}'"):
                 con2=db_bag(); con2.execute("DELETE FROM ogrenci_listeleri WHERE id=?",(r[0],)); con2.commit(); con2.close(); st.rerun()
+
+            if st.session_state.get(goruntu_key, False):
+                with st.container(border=True):
+                    st.markdown(f"**👥 {r[1]}** — {len(og)} öğrenci")
+                    df_og = pd.DataFrame(og).rename(columns={"no": "Öğrenci No", "ad": "Ad Soyad"})
+                    st.dataframe(df_og, use_container_width=True, hide_index=True)
+                    buf = BytesIO()
+                    df_og.to_excel(buf, index=False, engine="openpyxl")
+                    st.download_button("⬇️ Excel İndir", buf.getvalue(),
+                                       f"{r[1]}.xlsx",
+                                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key=f"indir_{r[0]}")
     except Exception as e:
         st.error(f"Hata: {e}")
 
