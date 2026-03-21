@@ -931,7 +931,7 @@ else:
     _css_uygula()
     k = st.session_state.kullanici
     with st.sidebar:
-        st.sidebar.markdown("""
+        st.markdown("""
 <div style="
     background: linear-gradient(135deg, #185FA5, #378ADD);
     border-radius: 12px;
