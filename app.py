@@ -12,7 +12,7 @@ from io import BytesIO
 TARAMA_DPI     = 300
 MAX_GORUNTU_PX = 1200
 DB_YOLU        = os.path.join(os.getcwd(), "omr.db")
-POPPLER_PATH   = r"C:\PYTHON GENEL\OMR\poppler\poppler-24.08.0\Library\bin"
+POPPLER_PATH   = r"C:\PYTHON GENEL\OMR\poppler\poppler-24.08.0\Library\bin" if os.name == "nt" else None
 
 ARUCO_DICT   = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 ARUCO_PARAMS = cv2.aruco.DetectorParameters()
