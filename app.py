@@ -593,6 +593,16 @@ def sayfa_sinav():
                 api_key = _api_key_sabit
                 st.info("✅ Gemini API Key yapılandırılmış.")
             else:
+                with st.expander("ℹ️ Gemini API Key nasıl alınır?"):
+                    st.markdown("""
+1. [aistudio.google.com](https://aistudio.google.com) adresine git
+2. Google hesabınla giriş yap
+3. Sol menüden **"Get API Key"** → **"Create API Key"** tıkla
+4. Oluşturulan `AIza...` ile başlayan anahtarı kopyala
+5. Aşağıdaki alana yapıştır
+
+> 🔒 Key sadece bu oturumda kullanılır, sunucuda saklanmaz.
+                    """)
                 api_key = st.text_input("Gemini API Key", type="password",
                                         placeholder="AIza...")
         pdf = st.file_uploader("Sınav PDF", type=["pdf"])
