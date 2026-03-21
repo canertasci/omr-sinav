@@ -23,6 +23,10 @@ class ScanSingleRequest(BaseModel):
         le=100,
         description="Soru sayısı (10/20/25/40/50/100)",
     )
+    gemini_api_key: str | None = Field(
+        default=None,
+        description="Kullanıcının kendi Gemini API key'i (opsiyonel)",
+    )
 
 
 class ScanBatchRequest(BaseModel):
@@ -176,6 +180,31 @@ class RegisterResponse(BaseModel):
     tam_ad: str
     kredi: int
     mesaj: str
+
+
+# ─────────────────────────────── EXCEL SINAV ─────────────────────────
+
+class ExcelSinavRequest(BaseModel):
+    goruntuler: list[str] = Field(
+        ..., max_length=100,
+        description="Base64 görüntü listesi (her biri bir cevap kağıdı)",
+    )
+    ogrenci_listesi_b64: str | None = Field(
+        default=None,
+        description="Öğrenci listesi Excel base64 (A=No, B=Ad Soyad, başlık yok)",
+    )
+    cevap_anahtari: dict[str, str]
+    soru_sayisi: int = Field(default=20, ge=10, le=100)
+    sinav_adi: str = Field(default="Sinav", max_length=100)
+    gemini_api_key: str | None = None
+
+
+class ExcelSinavResponse(BaseModel):
+    ozet_excel_b64: str
+    detay_excel_b64: str
+    toplam: int
+    basarili: int
+    hatali: int
 
 
 # ─────────────────────────────── HEALTH ──────────────────────────────

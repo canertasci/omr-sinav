@@ -1,18 +1,24 @@
 """
-POST /api/v1/scan/single  — tek kağıt okuma
-POST /api/v1/scan/batch   — toplu kağıt okuma (max 30)
+POST /api/v1/scan/single       — tek kağıt okuma
+POST /api/v1/scan/batch        — toplu kağıt okuma (max 30)
+POST /api/v1/scan/excel-sinav  — Excel listesiyle toplu tarama + Excel çıktısı
 """
 from __future__ import annotations
 
 import base64
+import io
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from fastapi import APIRouter, Depends, HTTPException
 
 from middleware.auth_middleware import verify_firebase_token
 from models.schemas import (
     BatchSonuc,
+    ExcelSinavRequest,
+    ExcelSinavResponse,
     KontrolGerekli,
     ScanBatchRequest,
     ScanBatchResponse,
@@ -50,7 +56,7 @@ async def scan_single(
     sonuc = kagit_oku(
         goruntu_bytes=goruntu_bytes,
         cevap_anahtari=req.cevap_anahtari,
-        api_key=GEMINI_API_KEY,
+        api_key=req.gemini_api_key or GEMINI_API_KEY,
         soru_sayisi=req.soru_sayisi,
     )
 
@@ -182,4 +188,179 @@ async def scan_batch(
         basarili=basarili,
         hatali=hatali,
         kontrol_gerekli=kontrol_listesi,
+    )
+
+
+# ─────────────────────────── Excel Sınav ────────────────────────────
+
+def _eslesme_durumu(sonuc: dict, og_dict: dict[str, str]) -> str:
+    """Web versiyonuyla aynı eşleşme mantığı."""
+    if not og_dict:
+        return "Liste seçilmedi"
+    ogrenci_no = str(sonuc.get("ogrenci_no", "")).strip()
+    ad_soyad = str(sonuc.get("ad_soyad", "")).lower()
+    no_e = ogrenci_no in og_dict
+    liste_ad = og_dict.get(ogrenci_no, "").lower()
+    ad_e = any(p in liste_ad for p in ad_soyad.split() if len(p) > 2)
+    if no_e and ad_e:
+        return "Eşleşme var"
+    elif no_e:
+        return "No eşleşti, ad farklı"
+    elif ad_e:
+        return "Ad eşleşti, no farklı"
+    else:
+        return "Eşleşme yok"
+
+
+def _excel_ozet(sonuclar: list[dict]) -> str:
+    """Özet Excel'i oluştur, base64 döndür."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Ozet"
+    mavi = PatternFill("solid", fgColor="1a56db")
+    beyaz = Font(color="FFFFFF", bold=True)
+    kenar = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    basliklar = ["Sayfa", "Ad Soyad", "Ogrenci No", "Durum",
+                 "Dogru", "Yanlis", "Bos", "Puan"]
+    for j, b in enumerate(basliklar, 1):
+        h = ws.cell(row=1, column=j, value=b)
+        h.fill = mavi; h.font = beyaz
+        h.alignment = Alignment(horizontal="center"); h.border = kenar
+    for i, s in enumerate(sonuclar, 2):
+        vals = [s.get("sayfa"), s.get("ad_soyad"), s.get("ogrenci_no"),
+                s.get("durum"), s.get("dogru"), s.get("yanlis"),
+                s.get("bos"), s.get("puan")]
+        for j, d in enumerate(vals, 1):
+            hc = ws.cell(row=i, column=j, value=d)
+            hc.border = kenar
+            hc.alignment = Alignment(horizontal="center")
+            durum = s.get("durum", "")
+            if "Eşleşme var" in durum:
+                hc.fill = PatternFill("solid", fgColor="d1fae5")
+            elif "farklı" in durum:
+                hc.fill = PatternFill("solid", fgColor="fef3c7")
+            elif "yok" in durum or "Hata" in durum:
+                hc.fill = PatternFill("solid", fgColor="fee2e2")
+    for col in ws.columns:
+        ws.column_dimensions[col[0].column_letter].width = 18
+    buf = io.BytesIO(); wb.save(buf)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _excel_detay(sonuclar: list[dict], cevap_anahtari: dict, soru_sayisi: int) -> str:
+    """Detay Excel'i oluştur (her sorunun cevabı), base64 döndür."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Detay"
+    mavi = PatternFill("solid", fgColor="1a56db")
+    beyaz = Font(color="FFFFFF", bold=True)
+    kenar = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    basliklar = ["Ad Soyad", "Ogrenci No", "Puan"] + [f"S{i}" for i in range(1, soru_sayisi + 1)]
+    for j, b in enumerate(basliklar, 1):
+        h = ws.cell(row=1, column=j, value=b)
+        h.fill = mavi; h.font = beyaz
+        h.alignment = Alignment(horizontal="center"); h.border = kenar
+    # Cevap anahtarı satırı
+    ws.cell(row=2, column=1, value="CEVAP ANAHTARI").font = Font(bold=True)
+    ws.cell(row=2, column=2, value="-")
+    ws.cell(row=2, column=3, value="-")
+    for s in range(1, soru_sayisi + 1):
+        hc = ws.cell(row=2, column=s + 3, value=cevap_anahtari.get(str(s), "?"))
+        hc.fill = PatternFill("solid", fgColor="dbeafe")
+        hc.font = Font(bold=True)
+        hc.alignment = Alignment(horizontal="center"); hc.border = kenar
+    for i, s in enumerate(sonuclar, 3):
+        ws.cell(row=i, column=1, value=s.get("ad_soyad", "")).border = kenar
+        ws.cell(row=i, column=2, value=s.get("ogrenci_no", "")).border = kenar
+        ws.cell(row=i, column=3, value=s.get("puan", 0)).border = kenar
+        for soru in range(1, soru_sayisi + 1):
+            c = s.get("cevaplar", {}).get(str(soru), "?")
+            a = cevap_anahtari.get(str(soru), "?")
+            hc = ws.cell(row=i, column=soru + 3, value=c)
+            hc.alignment = Alignment(horizontal="center"); hc.border = kenar
+            if c == a:
+                hc.fill = PatternFill("solid", fgColor="d1fae5")
+            elif c == "BOS":
+                hc.fill = PatternFill("solid", fgColor="f3f4f6")
+            else:
+                hc.fill = PatternFill("solid", fgColor="fee2e2")
+    for col in ws.columns:
+        ws.column_dimensions[col[0].column_letter].width = 6
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 14
+    buf = io.BytesIO(); wb.save(buf)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+@router.post("/excel-sinav", response_model=ExcelSinavResponse,
+             summary="Excel listesiyle toplu tarama")
+async def scan_excel_sinav(
+    req: ExcelSinavRequest,
+    token_data: dict = Depends(verify_firebase_token),
+):
+    """
+    Fotoğraf listesi + öğrenci Excel'i alır, her kağıdı okur,
+    öğrenci listesiyle eşleştirir, Özet ve Detay Excel döndürür.
+    """
+    api_key = req.gemini_api_key or GEMINI_API_KEY
+
+    # Öğrenci listesini yükle (A=No, B=Ad Soyad, başlık yok)
+    og_dict: dict[str, str] = {}
+    if req.ogrenci_listesi_b64:
+        xl_bytes = base64.b64decode(req.ogrenci_listesi_b64)
+        xl_wb = openpyxl.load_workbook(io.BytesIO(xl_bytes))
+        xl_ws = xl_wb.active
+        for row in xl_ws.iter_rows(min_row=1, values_only=True):
+            if row[0] is not None and len(row) > 1 and row[1] is not None:
+                og_dict[str(row[0]).strip()] = str(row[1]).strip()
+
+    basarili = 0
+    hatali = 0
+    sonuclar: list[dict] = []
+
+    def _isle(indeks: int, b64: str) -> dict:
+        try:
+            goruntu_bytes = _decode_image(b64)
+            s = kagit_oku(
+                goruntu_bytes=goruntu_bytes,
+                cevap_anahtari=req.cevap_anahtari,
+                api_key=api_key,
+                soru_sayisi=req.soru_sayisi,
+            )
+            s["sayfa"] = indeks + 1
+            s["durum"] = "Hata" if s.get("hata") else _eslesme_durumu(s, og_dict)
+            return s
+        except Exception as exc:
+            return {
+                "sayfa": indeks + 1, "hata": str(exc), "durum": "Hata",
+                "ad_soyad": "?", "ogrenci_no": "?", "dogru": 0,
+                "yanlis": 0, "bos": req.soru_sayisi, "puan": 0.0,
+                "cevaplar": {}, "guvenskor": 0.0,
+            }
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_isle, i, b64): i
+                   for i, b64 in enumerate(req.goruntuler)}
+        for future in as_completed(futures):
+            s = future.result()
+            sonuclar.append(s)
+            if s.get("hata"):
+                hatali += 1
+            else:
+                basarili += 1
+
+    sonuclar.sort(key=lambda x: x.get("sayfa", 0))
+
+    return ExcelSinavResponse(
+        ozet_excel_b64=_excel_ozet(sonuclar),
+        detay_excel_b64=_excel_detay(sonuclar, req.cevap_anahtari, req.soru_sayisi),
+        toplam=len(req.goruntuler),
+        basarili=basarili,
+        hatali=hatali,
     )
