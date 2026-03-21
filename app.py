@@ -322,6 +322,49 @@ def excel_detay(sonuclar, cevap_anahtari, soru_sayisi=20):
         ws.column_dimensions[col[0].column_letter].width=12
     buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
+# ─── CSS ────────────────────────────────────────────────────
+def _css_uygula():
+    st.markdown("""
+    <style>
+    /* Sil onay butonu kırmızı */
+    div[data-testid="stButton"] button[kind="secondary"] { border-color: #e53e3e; color: #e53e3e; }
+    div[data-testid="stButton"] button[kind="secondary"]:hover { background-color: #fff5f5; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ─── ANA SAYFA ───────────────────────────────────────────────
+def sayfa_anasayfa():
+    st.header("Ana Sayfa")
+    uid = st.session_state.kullanici["id"]
+    try:
+        con = db_bag()
+        sablon_sayisi  = con.execute("SELECT COUNT(*) FROM sablonlar WHERE kullanici_id=?", (uid,)).fetchone()[0]
+        tarama_sayisi  = con.execute("SELECT COUNT(*) FROM taramalar WHERE kullanici_id=?", (uid,)).fetchone()[0]
+        listeler       = con.execute("SELECT ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?", (uid,)).fetchall()
+        son_taramalar  = con.execute(
+            "SELECT anahtar_adi,sablon_adi,toplam_kagit,basarili,tarih "
+            "FROM taramalar WHERE kullanici_id=? ORDER BY id DESC LIMIT 5", (uid,)
+        ).fetchall()
+        con.close()
+
+        ogrenci_sayisi = sum(len(json.loads(r[0])) for r in listeler)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("📐 Şablon Sayısı", sablon_sayisi)
+        c2.metric("👥 Toplam Öğrenci", ogrenci_sayisi)
+        c3.metric("📊 Toplam Tarama", tarama_sayisi)
+
+        st.subheader("Son 5 Tarama")
+        if son_taramalar:
+            df = pd.DataFrame(son_taramalar,
+                              columns=["Cevap Anahtarı","Şablon","Toplam Kağıt","Başarılı","Tarih"])
+            df["Tarih"] = df["Tarih"].str[:16]
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Henüz tarama yapılmamış. 'Sınav Oku' sayfasından başlayabilirsiniz.")
+    except Exception as e:
+        st.error(f"Hata: {e}")
+
 # ─── SAYFALAR ───────────────────────────────────────────────
 def sayfa_sablon():
     st.header("Şablon Yönetimi")
@@ -555,6 +598,38 @@ def sayfa_gecmis():
         if "gecmis_secili" not in st.session_state:
             st.session_state.gecmis_secili = None
 
+        # ── Filtreleme ───────────────────────────────────────
+        with st.expander("🔍 Filtrele", expanded=False):
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                sablon_adlari = sorted({t[2] for t in taramalar})
+                secili_sablon = st.selectbox("Şablon Adı", ["Tümü"] + sablon_adlari)
+            with fc2:
+                tarih_filtre = st.text_input("Tarih içerir (örn: 2025-06)", "")
+
+        if secili_sablon != "Tümü":
+            taramalar = [t for t in taramalar if t[2] == secili_sablon]
+        if tarih_filtre:
+            taramalar = [t for t in taramalar if tarih_filtre in t[6]]
+
+        # ── Toplu Excel Export ───────────────────────────────
+        if taramalar:
+            if st.button("📥 Tümünü Excel'e Aktar", type="primary"):
+                rows = []
+                for t in taramalar:
+                    rows.append({
+                        "Cevap Anahtarı": t[1], "Şablon": t[2],
+                        "Soru Sayısı": t[3], "Toplam Kağıt": t[4],
+                        "Başarılı": t[5], "Tarih": t[6][:16]
+                    })
+                df_exp = pd.DataFrame(rows)
+                buf = BytesIO()
+                df_exp.to_excel(buf, index=False, engine="openpyxl")
+                st.download_button(
+                    "⬇️ İndir", buf.getvalue(), "gecmis_taramalar.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
         st.subheader(f"Toplam {len(taramalar)} tarama")
         for t in taramalar:
             tid, anahtar_adi, sablon_adi, ss, toplam, basarili, tarih = t
@@ -667,26 +742,29 @@ db_olustur()
 if "kullanici" not in st.session_state:
     giris_sayfasi()
 else:
+    _css_uygula()
     k = st.session_state.kullanici
     with st.sidebar:
         st.markdown(f"### {k['tam_ad'] or k['kullanici_adi']}")
         st.divider()
         sayfa = st.radio("Menü",[
-            "Şablon Yönetimi",
-            "Cevap Anahtarı",
-            "Öğrenci Listesi",
-            "Sınav Oku",
-            "Geçmiş Taramalar",
-            "Kullanıcı Yönetimi",
+            "🏠 Ana Sayfa",
+            "📐 Şablon Yönetimi",
+            "🔑 Cevap Anahtarı",
+            "👥 Öğrenci Listesi",
+            "📋 Sınav Oku",
+            "📊 Geçmiş Taramalar",
+            "⚙️ Kullanıcı Yönetimi",
         ])
         st.divider()
         if st.button("Çıkış Yap"):
             del st.session_state.kullanici
             st.rerun()
 
-    if   sayfa == "Şablon Yönetimi":    sayfa_sablon()
-    elif sayfa == "Cevap Anahtarı":     sayfa_anahtar()
-    elif sayfa == "Öğrenci Listesi":    sayfa_liste()
-    elif sayfa == "Sınav Oku":          sayfa_sinav()
-    elif sayfa == "Geçmiş Taramalar":   sayfa_gecmis()
-    elif sayfa == "Kullanıcı Yönetimi": sayfa_kullanici()
+    if   sayfa == "🏠 Ana Sayfa":            sayfa_anasayfa()
+    elif sayfa == "📐 Şablon Yönetimi":      sayfa_sablon()
+    elif sayfa == "🔑 Cevap Anahtarı":       sayfa_anahtar()
+    elif sayfa == "👥 Öğrenci Listesi":      sayfa_liste()
+    elif sayfa == "📋 Sınav Oku":            sayfa_sinav()
+    elif sayfa == "📊 Geçmiş Taramalar":     sayfa_gecmis()
+    elif sayfa == "⚙️ Kullanıcı Yönetimi":  sayfa_kullanici()
