@@ -961,14 +961,6 @@ else:
     </div>
 </div>
 """, unsafe_allow_html=True)
-        st.markdown("""
-        <div style="text-align:center;padding:1.2rem 0 0.5rem;">
-            <div style="font-size:1.7rem;font-weight:900;letter-spacing:-0.5px;">🎓 ÖğretmenAI</div>
-            <div style="font-size:0.72rem;opacity:0.85;margin-top:3px;">Sınav Değerlendirme Sistemi</div>
-            <div style="font-size:0.68rem;opacity:0.65;margin-top:2px;">Yalova Üniversitesi</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.divider()
         tam_ad = k['tam_ad'] or k['kullanici_adi']
         giris_saati = st.session_state.get("giris_saati", "")
         st.markdown(f"**👤 {tam_ad}**")
