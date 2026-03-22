@@ -228,14 +228,17 @@ async def get_metrics():
     return JSONResponse(content=metrics.to_dict())
 
 
-@app.get("/debug/env-check", tags=["Sistem"], summary="Firebase env var teşhis")
+@app.get("/debug/env-check", tags=["Sistem"], summary="Env var teşhis")
 async def debug_env_check():
-    """Railway'de hangi Firebase env var'ların set olduğunu gösterir (değerleri GÖSTERMEz)."""
+    """Railway'de kritik env var'ların durumunu gösterir (değerleri GÖSTERMEz)."""
     b64_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64", "")
     json_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
     path_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+    gemini_raw = os.getenv("GEMINI_API_KEY", "")
     firebase_keys = [k for k in os.environ if "FIREBASE" in k.upper() or "FIRE" in k.upper()]
     return {
+        "GEMINI_API_KEY": f"SET (len={len(gemini_raw)}, starts={gemini_raw[:8]}...)" if gemini_raw else "NOT SET ⚠️",
+        "settings.gemini_api_key": f"SET (len={len(settings.gemini_api_key)})" if settings.gemini_api_key else "EMPTY ⚠️",
         "FIREBASE_SERVICE_ACCOUNT_JSON_B64": f"SET (len={len(b64_raw)})" if b64_raw else "NOT SET",
         "FIREBASE_SERVICE_ACCOUNT_JSON": f"SET (len={len(json_raw)})" if json_raw else "NOT SET",
         "FIREBASE_SERVICE_ACCOUNT_PATH": path_raw or "NOT SET",
