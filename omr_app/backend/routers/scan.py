@@ -12,7 +12,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from middleware.auth_middleware import verify_firebase_token
 from models.schemas import (
@@ -27,21 +29,21 @@ from models.schemas import (
 )
 from services import firebase_service as fb
 from services.omr_engine import kagit_oku
+from utils.logger import get_logger
+from utils.image_utils import decode_base64_image as _decode_image
+from config import settings
 
+log = get_logger("omr.scan")
 router = APIRouter(prefix="/api/v1/scan", tags=["Tarama"])
+limiter = Limiter(key_func=get_remote_address)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-
-def _decode_image(b64: str) -> bytes:
-    """Base64 → bytes. data:image/... prefix'i varsa soyar."""
-    if "," in b64:
-        b64 = b64.split(",", 1)[1]
-    return base64.b64decode(b64)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "") or settings.gemini_api_key
 
 
 @router.post("/single", response_model=ScanResponse, summary="Tek kağıt oku")
+@limiter.limit("30/minute")
 async def scan_single(
+    request: Request,
     req: ScanSingleRequest,
     token_data: dict = Depends(verify_firebase_token),
 ):
@@ -71,8 +73,13 @@ async def scan_single(
     # Başarılı → 1 kredi düş
     kredi_yeterli = fb.kredi_dус(uid, miktar=1, aciklama=f"Sınav {req.sinav_id} tarama")
     if not kredi_yeterli:
+        log.warning("Yetersiz kredi", extra={"uid": uid, "sinav_id": req.sinav_id})
         raise HTTPException(status_code=402, detail="Yetersiz kredi. Lütfen kredi satın alın.")
 
+    log.info("Tarama başarılı — kredi düşüldü", extra={
+        "uid": uid, "sinav_id": req.sinav_id,
+        "ogrenci_no": sonuc.get("ogrenci_no"), "puan": sonuc.get("puan"),
+    })
     # Firestore'a kaydet
     fb.sonuc_kaydet({
         "sinav_id": req.sinav_id,
@@ -94,7 +101,9 @@ async def scan_single(
 
 
 @router.post("/batch", response_model=ScanBatchResponse, summary="Toplu kağıt oku (max 30)")
+@limiter.limit("10/minute")
 async def scan_batch(
+    request: Request,
     req: ScanBatchRequest,
     token_data: dict = Depends(verify_firebase_token),
 ):
@@ -154,9 +163,7 @@ async def scan_batch(
         except Exception as exc:
             return BatchSonuc(indeks=indeks, hata_mesaji=str(exc))
 
-    GUVEN_ESIGI = 0.70
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=settings.thread_workers) as executor:
         futures = {executor.submit(_isle, i, b64): i for i, b64 in enumerate(req.goruntuler)}
         for future in as_completed(futures):
             bs = future.result()
@@ -171,7 +178,7 @@ async def scan_batch(
             else:
                 basarili += 1
                 sonuc = bs.sonuc
-                if sonuc and (sonuc.hata or sonuc.guvenskor < GUVEN_ESIGI):
+                if sonuc and (sonuc.hata or sonuc.guvenskor < settings.guven_esigi):
                     sebep = sonuc.hata or f"Düşük güven skoru ({sonuc.guvenskor:.2f})"
                     kontrol_listesi.append(KontrolGerekli(
                         indeks=bs.indeks,
@@ -246,8 +253,9 @@ def _excel_ozet(sonuclar: list[dict]) -> str:
                 hc.fill = PatternFill("solid", fgColor="fee2e2")
     for col in ws.columns:
         ws.column_dimensions[col[0].column_letter].width = 18
-    buf = io.BytesIO(); wb.save(buf)
-    return base64.b64encode(buf.getvalue()).decode()
+    with io.BytesIO() as buf:
+        wb.save(buf)
+        return base64.b64encode(buf.getvalue()).decode()
 
 
 def _excel_detay(sonuclar: list[dict], cevap_anahtari: dict, soru_sayisi: int) -> str:
@@ -294,8 +302,9 @@ def _excel_detay(sonuclar: list[dict], cevap_anahtari: dict, soru_sayisi: int) -
         ws.column_dimensions[col[0].column_letter].width = 6
     ws.column_dimensions["A"].width = 20
     ws.column_dimensions["B"].width = 14
-    buf = io.BytesIO(); wb.save(buf)
-    return base64.b64encode(buf.getvalue()).decode()
+    with io.BytesIO() as buf:
+        wb.save(buf)
+        return base64.b64encode(buf.getvalue()).decode()
 
 
 @router.post("/excel-sinav", response_model=ExcelSinavResponse,
@@ -344,7 +353,7 @@ async def scan_excel_sinav(
                 "cevaplar": {}, "guvenskor": 0.0,
             }
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=settings.thread_workers) as executor:
         futures = {executor.submit(_isle, i, b64): i
                    for i, b64 in enumerate(req.goruntuler)}
         for future in as_completed(futures):

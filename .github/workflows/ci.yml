@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Lint & Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install system dependencies (OpenCV)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libgl1
+
+      - name: Install Python dependencies
+        working-directory: omr_app/backend
+        run: pip install -r requirements.txt
+
+      - name: Lint with ruff
+        working-directory: omr_app/backend
+        run: |
+          pip install ruff
+          ruff check . --ignore E501,E402 || true
+
+      - name: Run tests with coverage
+        working-directory: omr_app/backend
+        env:
+          SKIP_AUTH: "true"
+          GEMINI_API_KEY: "test_key_for_ci"
+          ENVIRONMENT: "test"
+        run: |
+          pytest tests/ -v \
+            --cov=. \
+            --cov-report=term-missing \
+            --cov-omit="tests/*" \
+            --cov-fail-under=70
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: omr_app/backend/.coverage

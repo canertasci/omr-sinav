@@ -124,11 +124,24 @@ class TemplateGenerateResponse(BaseModel):
     sablon_id: str
 
 
+# ─────────────────────────────── PAGINATION ──────────────────────────
+
+class PaginationMeta(BaseModel):
+    """Sayfalama meta bilgisi."""
+    sayfa: int = Field(1, ge=1, description="Mevcut sayfa numarası")
+    sayfa_boyutu: int = Field(20, ge=1, le=100, description="Sayfa başına kayıt sayısı")
+    toplam: int = Field(..., description="Toplam kayıt sayısı")
+    toplam_sayfa: int = Field(..., description="Toplam sayfa sayısı")
+
+
 # ─────────────────────────────── RESULTS ─────────────────────────────
 
 class SonucListResponse(BaseModel):
     sonuclar: list[dict[str, Any]]
     toplam: int
+    # Pagination (opsiyonel — geriye dönük uyumluluk)
+    sayfa: int = 1
+    sayfa_boyutu: int = 20
 
 
 class IstatistikResponse(BaseModel):

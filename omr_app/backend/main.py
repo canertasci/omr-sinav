@@ -4,28 +4,117 @@ FastAPI ana uygulama — OMR Backend
 from __future__ import annotations
 
 import os
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
+from threading import Lock
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-# .env yükle (Railway/Render'da environment variables zaten set edilmiş olur)
-load_dotenv()
+from exceptions import (
+    GeminiAPIError,
+    ImageValidationError,
+    InsufficientCreditsError,
+    OMRBaseError,
+    OMRDetectionError,
+)
 
+# .env dosyasını backend dizininde kesin bul (çalışma dizini farklı olsa bile)
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(_env_path)
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+from utils.logger import get_logger, setup_root_logger, RequestLoggingMiddleware
 from routers import auth, credits, results, scan, template
 from models.schemas import HealthResponse
+from config import settings
+
+# Rate limiter (global, router'lar import eder)
+limiter = Limiter(key_func=get_remote_address)
+
+setup_root_logger(settings.log_level)
+log = get_logger("omr.main")
+
+# ─────────────────────────── Metrics Store ───────────────────────────────────
+
+class MetricsStore:
+    """Thread-safe basit metrics depolaması."""
+    def __init__(self):
+        self._lock = Lock()
+        self.total_requests = 0
+        self.error_counts: dict[int, int] = defaultdict(int)
+        self.total_response_time_ms = 0.0
+        self.gemini_success = 0
+        self.gemini_error = 0
+
+    def record_request(self, status_code: int, elapsed_ms: float):
+        with self._lock:
+            self.total_requests += 1
+            self.total_response_time_ms += elapsed_ms
+            if status_code >= 400:
+                self.error_counts[status_code] += 1
+
+    def to_dict(self) -> dict:
+        with self._lock:
+            avg_ms = (
+                round(self.total_response_time_ms / self.total_requests, 1)
+                if self.total_requests > 0 else 0.0
+            )
+            total_errors = sum(self.error_counts.values())
+            error_rate = round(total_errors / self.total_requests, 4) if self.total_requests > 0 else 0.0
+            return {
+                "total_requests": self.total_requests,
+                "error_rate": error_rate,
+                "error_counts": dict(self.error_counts),
+                "avg_response_ms": avg_ms,
+                "gemini_success": self.gemini_success,
+                "gemini_error": self.gemini_error,
+            }
+
+
+metrics = MetricsStore()
+
+# ─────────────────────────── Sentry ──────────────────────────────────────────
+
+def _setup_sentry():
+    dsn = settings.sentry_dsn
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=settings.environment,
+            traces_sample_rate=0.2,
+            integrations=[FastApiIntegration(), StarletteIntegration()],
+        )
+        log.info("Sentry başlatıldı", extra={"environment": settings.environment})
+    except ImportError:
+        log.warning("sentry-sdk kurulu değil, Sentry devre dışı")
+
 
 # ─────────────────────────── Lifespan ────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Uygulama başlarken ve kapanırken çalışır."""
-    print("🚀 OMR Backend başlatıldı")
-    print(f"   GEMINI_API_KEY: {'✓ var' if os.getenv('GEMINI_API_KEY') else '✗ eksik!'}")
-    print(f"   SKIP_AUTH: {os.getenv('SKIP_AUTH', 'false')}")
+    _setup_sentry()
+    log.info("OMR Backend başlatıldı", extra={
+        "gemini_key": "var" if settings.gemini_api_key else "EKSİK",
+        "skip_auth": str(settings.skip_auth),
+        "environment": settings.environment,
+    })
     yield
-    print("👋 OMR Backend kapandı")
+    log.info("OMR Backend kapandı")
 
 
 # ─────────────────────────── FastAPI App ─────────────────────────────
@@ -44,16 +133,74 @@ app = FastAPI(
 
 # ─────────────────────────── CORS ────────────────────────────────────
 
-# Production'da Flutter app domain'ini buraya ekle
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+if settings.is_production and not settings.cors_origins:
+    log.warning(
+        "PRODUCTION ortamında CORS_ORIGINS ayarlanmamış! "
+        "Güvenlik için .env dosyasına explicit origin listesi ekleyin."
+    )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
+
+# Rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ─────────────────────────── Metrics Middleware ───────────────────────────────
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    metrics.record_request(response.status_code, elapsed_ms)
+    return response
+
+
+# ─────────────────────────── Exception Handler'lar ───────────────────
+
+_STATUS_MAP: dict[type, int] = {
+    OMRDetectionError: 422,
+    InsufficientCreditsError: 402,
+    GeminiAPIError: 502,
+    ImageValidationError: 400,
+}
+
+
+@app.exception_handler(OMRBaseError)
+async def omr_error_handler(request: Request, exc: OMRBaseError) -> JSONResponse:
+    status = _STATUS_MAP.get(type(exc), 500)
+    log.error(
+        "OMR hatası",
+        extra={
+            "type": type(exc).__name__,
+            "detail": exc.detail,
+            "path": request.url.path,
+        },
+        exc_info=True,
+    )
+    return JSONResponse(status_code=status, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def general_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    log.error(
+        "Beklenmeyen hata",
+        extra={"path": request.url.path, "method": request.method},
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Sunucuda beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."},
+    )
+
 
 # ─────────────────────────── Router'lar ──────────────────────────────
 
@@ -64,12 +211,21 @@ app.include_router(results.router)
 app.include_router(credits.router)
 
 
-# ─────────────────────────── Sağlık Kontrolü ─────────────────────────
+# ─────────────────────────── Sistem Endpoint'leri ────────────────────
 
 @app.get("/health", response_model=HealthResponse, tags=["Sistem"])
 async def health():
     """Railway/Render health check endpoint."""
     return HealthResponse()
+
+
+@app.get("/metrics", tags=["Sistem"], summary="Uygulama metrikleri")
+async def get_metrics():
+    """
+    Basit JSON metrikler: toplam istek, hata oranı, ortalama süre,
+    Gemini API başarı/hata sayısı.
+    """
+    return JSONResponse(content=metrics.to_dict())
 
 
 @app.get("/", tags=["Sistem"])

@@ -1,0 +1,35 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:  # Manuel tetikleme
+
+jobs:
+  deploy:
+    name: Deploy FastAPI Backend
+    runs-on: ubuntu-latest
+    needs: []  # CI bağımsız çalışır (ayrı workflow)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up --service omr-backend --detach
+
+      - name: Health check
+        run: |
+          sleep 30
+          curl --fail "${{ secrets.RAILWAY_HEALTH_URL }}/health" \
+            -H "Accept: application/json" \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 10 \
+            || echo "Health check failed — kontrol edin"

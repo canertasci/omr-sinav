@@ -10,16 +10,23 @@ import statistics
 from collections import defaultdict
 from difflib import SequenceMatcher
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+import hashlib
+import json as _json
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from middleware.auth_middleware import verify_firebase_token
 from models.schemas import IstatistikResponse, SonucListResponse
 from services import firebase_service as fb
+from utils.logger import get_logger
 
+log = get_logger("omr.results")
 router = APIRouter(prefix="/api/v1/results", tags=["Sonuçlar"])
+
+MAX_EXCEL_BYTES = 5 * 1024 * 1024  # 5 MB
 
 # Renk filleri
 TURUNCU = PatternFill("solid", fgColor="F4B942")
@@ -77,17 +84,36 @@ def _sinav_yetki_kontrol(sinav_id: str, uid: str) -> dict:
 @router.get("/{sinav_id}", response_model=SonucListResponse, summary="Sınav sonuçları")
 async def get_results(
     sinav_id: str,
+    sayfa: int = Query(1, ge=1, description="Sayfa numarası"),
+    sayfa_boyutu: int = Query(20, ge=1, le=100, description="Sayfa başına sonuç sayısı"),
     token_data: dict = Depends(verify_firebase_token),
 ):
     uid = token_data["uid"]
     _sinav_yetki_kontrol(sinav_id, uid)
-    sonuclar = fb.sinav_sonuclari(sinav_id)
-    return SonucListResponse(sonuclar=sonuclar, toplam=len(sonuclar))
+    tum_sonuclar = fb.sinav_sonuclari(sinav_id)
+    toplam = len(tum_sonuclar)
+
+    # Pagination
+    baslangic = (sayfa - 1) * sayfa_boyutu
+    bitis = baslangic + sayfa_boyutu
+    sonuclar_sayfalı = tum_sonuclar[baslangic:bitis]
+
+    response = JSONResponse(
+        content=SonucListResponse(
+            sonuclar=sonuclar_sayfalı,
+            toplam=toplam,
+            sayfa=sayfa,
+            sayfa_boyutu=sayfa_boyutu,
+        ).model_dump(),
+    )
+    response.headers["Cache-Control"] = "private, max-age=30"
+    return response
 
 
 @router.get("/{sinav_id}/statistics", response_model=IstatistikResponse, summary="Sınav istatistikleri")
 async def get_statistics(
     sinav_id: str,
+    request: Request,
     token_data: dict = Depends(verify_firebase_token),
 ):
     uid = token_data["uid"]
@@ -112,7 +138,7 @@ async def get_statistics(
     n = len(sonuclar)
     basari_oranlari = {k: round(v / n, 3) for k, v in soru_dogru.items()}
 
-    return IstatistikResponse(
+    istatistik = IstatistikResponse(
         sinav_id=sinav_id,
         ogrenci_sayisi=n,
         ortalama=round(statistics.mean(puanlar), 2),
@@ -121,6 +147,22 @@ async def get_statistics(
         max_puan=max(puanlar),
         standart_sapma=round(statistics.stdev(puanlar) if n > 1 else 0.0, 2),
         soru_basari_oranlari=basari_oranlari,
+    )
+
+    # ETag: içerik hash'i üzerinden (değişmemişse 304 Not Modified)
+    etag_data = _json.dumps(istatistik.model_dump(), sort_keys=True, default=str)
+    etag = f'"{hashlib.md5(etag_data.encode()).hexdigest()}"'  # noqa: S324
+
+    if_none_match = request.headers.get("If-None-Match", "")
+    if if_none_match == etag:
+        return Response(status_code=304)
+
+    return JSONResponse(
+        content=istatistik.model_dump(),
+        headers={
+            "ETag": etag,
+            "Cache-Control": "private, max-age=60",
+        },
     )
 
 
@@ -214,18 +256,21 @@ async def export_excel(
                 c.fill = KIRMIZI
 
     # Excel dosyasını bellekte oluştur
+    sinav_adi_ascii = sinav.get("ad", sinav_id).replace(" ", "_").encode("ascii", "ignore").decode()
+    dosya_adi = f"sonuclar_{sinav_adi_ascii or sinav_id}.xlsx"
+
     excel_buf = io.BytesIO()
-    wb.save(excel_buf)
-    excel_buf.seek(0)
-
-    sinav_adi = sinav.get("ad", sinav_id).replace(" ", "_")
-    dosya_adi = f"sonuclar_{sinav_adi}.xlsx"
-
-    return StreamingResponse(
-        excel_buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{dosya_adi}"'},
-    )
+    try:
+        wb.save(excel_buf)
+        excel_buf.seek(0)
+        return StreamingResponse(
+            excel_buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{dosya_adi}"'},
+        )
+    except Exception:
+        excel_buf.close()
+        raise
 
 
 @router.post("/{sinav_id}/export-with-list", summary="Öğrenci listesine not yaz")
@@ -247,9 +292,15 @@ async def export_with_student_list(
 
     # ── Öğrenci listesi Excel'ini oku ────────────────────────────────
     icerik = await ogrenci_listesi.read()
+    if len(icerik) > MAX_EXCEL_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Excel dosyası çok büyük ({len(icerik) // (1024*1024):.1f}MB). Maksimum 5MB izin verilir.",
+        )
     try:
         wb = openpyxl.load_workbook(io.BytesIO(icerik))
-    except Exception:
+    except Exception as exc:
+        log.warning("Excel dosyası okunamadı", extra={"hata": str(exc)})
         raise HTTPException(status_code=400, detail="Excel dosyası okunamadı. Geçerli bir .xlsx dosyası yükleyin.")
 
     ws = wb.active
@@ -338,15 +389,18 @@ async def export_with_student_list(
         uyari_ws.column_dimensions["A"].width = 40
 
     # ── Dosyayı döndür ───────────────────────────────────────────────
+    sinav_adi = sinav_id.replace(" ", "_").encode("ascii", "ignore").decode()
+    dosya_adi = f"notlar_{sinav_adi or sinav_id}.xlsx"
+
     excel_buf = io.BytesIO()
-    wb.save(excel_buf)
-    excel_buf.seek(0)
-
-    sinav_adi = sinav_id.replace(" ", "_")
-    dosya_adi = f"notlar_{sinav_adi}.xlsx"
-
-    return StreamingResponse(
-        excel_buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{dosya_adi}"'},
-    )
+    try:
+        wb.save(excel_buf)
+        excel_buf.seek(0)
+        return StreamingResponse(
+            excel_buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{dosya_adi}"'},
+        )
+    except Exception:
+        excel_buf.close()
+        raise

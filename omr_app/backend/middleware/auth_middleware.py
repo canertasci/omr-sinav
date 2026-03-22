@@ -6,48 +6,22 @@ test için sabit bir uid döndürülür.
 """
 from __future__ import annotations
 
-import base64
 import os
-import json
 
 import firebase_admin
-from firebase_admin import auth, credentials
+from firebase_admin import auth
 from fastapi import Header, HTTPException
 
-_firebase_initialized = False
+from utils.logger import get_logger
+
+log = get_logger("omr.auth")
 
 # Modül yüklenirken bir kez hesapla + logla
 _SKIP = os.getenv("SKIP_AUTH", "false").strip().lower() in ("true", "1", "yes")
-print(f"[AUTH] SKIP_AUTH env='{os.getenv('SKIP_AUTH', 'NOT_SET')}' → bypass={_SKIP}")
-
-
-def _init_firebase() -> None:
-    global _firebase_initialized
-    if _firebase_initialized:
-        return
-
-    # 1) Base64 encoded JSON (Railway için önerilen yöntem)
-    sa_b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64")
-    if sa_b64:
-        sa_dict = json.loads(base64.b64decode(sa_b64).decode())
-        cred = credentials.Certificate(sa_dict)
-    # 2) Düz JSON string
-    elif os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON"):
-        sa_dict = json.loads(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON"))
-        cred = credentials.Certificate(sa_dict)
-    else:
-        # Dosya yolundan yükle (lokal geliştirme)
-        sa_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "firebase_service_account.json")
-        if not os.path.exists(sa_path):
-            raise RuntimeError(
-                f"Firebase service account bulunamadı: {sa_path}\n"
-                "FIREBASE_SERVICE_ACCOUNT_JSON veya FIREBASE_SERVICE_ACCOUNT_PATH "
-                ".env dosyasında tanımlı olmalı."
-            )
-        cred = credentials.Certificate(sa_path)
-
-    firebase_admin.initialize_app(cred)
-    _firebase_initialized = True
+log.info("Auth middleware yüklendi", extra={
+    "skip_auth_env": os.getenv("SKIP_AUTH", "NOT_SET"),
+    "bypass": _SKIP,
+})
 
 
 async def verify_firebase_token(
@@ -58,9 +32,18 @@ async def verify_firebase_token(
 
     Döner: {"uid": "...", "email": "...", ...}
     """
-    # Hem modül-level hem runtime kontrol (Railway geç inject edebilir)
-    skip = _SKIP or os.getenv("SKIP_AUTH", "false").strip().lower() in ("true", "1", "yes")
-    if skip:
+    # ENVIRONMENT=production iken SKIP_AUTH=true çalışmasın
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    skip_requested = _SKIP or os.getenv("SKIP_AUTH", "false").strip().lower() in ("true", "1", "yes")
+
+    if skip_requested and env == "production":
+        log.error(
+            "SKIP_AUTH=true production ortamında engellendi! "
+            "Güvenlik açığı önlendi. ENVIRONMENT değişkenini kontrol edin.",
+        )
+        skip_requested = False
+
+    if skip_requested:
         return {"uid": "dev_user_001", "email": "dev@example.com"}
 
     if not authorization or not authorization.startswith("Bearer "):
@@ -72,10 +55,19 @@ async def verify_firebase_token(
     token = authorization.split("Bearer ", 1)[1].strip()
 
     try:
-        _init_firebase()
+        # Firebase init'i merkezi firebase_service'den al (idempotent)
+        from services.firebase_service import init_firebase
+        init_firebase()
         decoded = auth.verify_id_token(token)
+        log.info("Token doğrulandı", extra={"uid": decoded.get("uid")})
         return decoded  # {"uid": "...", "email": "...", ...}
     except firebase_admin.exceptions.FirebaseError as exc:
+        log.warning("Token doğrulama başarısız", extra={"error": str(exc)})
         raise HTTPException(status_code=401, detail=f"Token doğrulanamadı: {exc}") from exc
+    except RuntimeError as exc:
+        # Firebase init hatası (service account bulunamadı)
+        log.error("Firebase başlatılamadı", extra={"error": str(exc)})
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except Exception as exc:
+        log.warning("Token doğrulama hatası", extra={"error": str(exc)})
         raise HTTPException(status_code=401, detail=str(exc)) from exc

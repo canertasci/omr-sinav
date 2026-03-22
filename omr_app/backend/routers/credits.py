@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from middleware.auth_middleware import verify_firebase_token
 from models.schemas import (
@@ -16,7 +17,10 @@ from models.schemas import (
     VerifyPurchaseResponse,
 )
 from services import firebase_service as fb
+from utils.logger import get_logger
+from config import settings
 
+log = get_logger("omr.credits")
 router = APIRouter(prefix="/api/v1/credits", tags=["Kredi"])
 
 # Google Play ürün ID → kredi miktarı
@@ -26,7 +30,7 @@ URUN_KREDI_MAPI = {
     "credits_10000": 10000,
 }
 
-REKLAM_KREDI = 10  # Rewarded reklam başına kazanılan kredi
+REKLAM_KREDI = settings.ad_reward_credits
 
 
 @router.get("/balance", response_model=KrediBalanceResponse, summary="Kredi bakiyesi")
@@ -35,11 +39,15 @@ async def get_balance(token_data: dict = Depends(verify_firebase_token)):
     kullanici = fb.kullanici_getir(uid)
     if not kullanici:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
-    return KrediBalanceResponse(
-        uid=uid,
-        kredi=kullanici.get("kredi", 0),
-        toplam_kullanilan=kullanici.get("toplam_kullanilan", 0),
+    response = JSONResponse(
+        content=KrediBalanceResponse(
+            uid=uid,
+            kredi=kullanici.get("kredi", 0),
+            toplam_kullanilan=kullanici.get("toplam_kullanilan", 0),
+        ).model_dump(),
     )
+    response.headers["Cache-Control"] = "private, no-cache"
+    return response
 
 
 @router.post("/verify-purchase", response_model=VerifyPurchaseResponse, summary="Google Play satın alma doğrula")
@@ -60,6 +68,10 @@ async def verify_purchase(
 
     # Double-spend önleme
     if fb.satin_alma_Token_kullanildi_mi(req.purchase_token):
+        log.warning("Çift harcama girişimi engellendi", extra={
+            "uid": uid, "product_id": req.product_id,
+            "token": req.purchase_token[:16] + "...",
+        })
         raise HTTPException(
             status_code=409,
             detail="Bu satın alma daha önce kullanılmış",
@@ -77,7 +89,10 @@ async def verify_purchase(
         aciklama=f"Google Play: {req.product_id}",
         play_token=req.purchase_token,
     )
-
+    log.info("Kredi satın alma onaylandı", extra={
+        "uid": uid, "product_id": req.product_id,
+        "miktar": miktar, "yeni_kredi": yeni_kredi,
+    })
     return VerifyPurchaseResponse(
         success=True,
         yeni_kredi=yeni_kredi,

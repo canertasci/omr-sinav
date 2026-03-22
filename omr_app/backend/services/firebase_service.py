@@ -4,33 +4,73 @@ Kullanıcı CRUD, kredi işlemleri, sınav/sonuç kayıtları.
 """
 from __future__ import annotations
 
-import os
+import base64
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any
 
 import firebase_admin
 from firebase_admin import firestore, auth, credentials
 
-_firebase_initialized = False
+from config import settings
+from utils.logger import get_logger
+
+log = get_logger("omr.firebase")
+
 _db = None
 
 
+def init_firebase() -> None:
+    """Firebase'i tek seferlik başlat. Birden fazla modül güvenle çağırabilir."""
+    if firebase_admin._apps:
+        return  # Zaten başlatılmış
+
+    cred = None
+
+    # 1) Base64 encoded JSON (Railway/Render için önerilen)
+    if settings.firebase_service_account_json_b64:
+        sa_dict = json.loads(
+            base64.b64decode(settings.firebase_service_account_json_b64).decode()
+        )
+        cred = credentials.Certificate(sa_dict)
+        log.info("Firebase credential: base64 JSON")
+
+    # 2) Düz JSON string
+    elif settings.firebase_service_account_json:
+        sa_dict = json.loads(settings.firebase_service_account_json)
+        cred = credentials.Certificate(sa_dict)
+        log.info("Firebase credential: JSON string")
+
+    # 3) Dosya yolu
+    elif settings.firebase_service_account_path:
+        sa_path = settings.firebase_service_account_path
+        if not os.path.exists(sa_path):
+            log.error("Firebase service account dosyası bulunamadı", extra={"path": sa_path})
+            raise RuntimeError(
+                f"Firebase service account bulunamadı: {sa_path}\n"
+                "Çözüm seçenekleri:\n"
+                "  1) FIREBASE_SERVICE_ACCOUNT_JSON_B64 env var ayarlayın (Railway için)\n"
+                "  2) FIREBASE_SERVICE_ACCOUNT_JSON env var'ına JSON string yapıştırın\n"
+                "  3) FIREBASE_SERVICE_ACCOUNT_PATH ile doğru dosya yolunu belirtin\n"
+                "Dosyayı Firebase Console > Project Settings > Service Accounts'tan indirin."
+            )
+        cred = credentials.Certificate(sa_path)
+        log.info("Firebase credential: dosya", extra={"path": sa_path})
+    else:
+        raise RuntimeError(
+            "Firebase service account yapılandırılmamış!\n"
+            "FIREBASE_SERVICE_ACCOUNT_JSON_B64, FIREBASE_SERVICE_ACCOUNT_JSON "
+            "veya FIREBASE_SERVICE_ACCOUNT_PATH ayarlanmalı."
+        )
+
+    firebase_admin.initialize_app(cred)
+    log.info("Firebase başlatıldı")
+
+
 def _get_db():
-    global _firebase_initialized, _db
-    if not _firebase_initialized:
-        sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-        if sa_json:
-            sa_dict = json.loads(sa_json)
-            cred = credentials.Certificate(sa_dict)
-        else:
-            sa_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "firebase_service_account.json")
-            cred = credentials.Certificate(sa_path)
-
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred)
-        _firebase_initialized = True
-
+    global _db
+    init_firebase()  # idempotent — zaten başlatıldıysa atlar
     if _db is None:
         _db = firestore.client()
     return _db
