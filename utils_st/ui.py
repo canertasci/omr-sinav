@@ -10,6 +10,8 @@ def css_uygula() -> None:
     """Uygulama genelinde özel CSS stillerini ekler."""
     st.markdown("""
     <style>
+    /* ─── Streamlit otomatik sayfa nav'ını gizle (bizim custom nav kullanıyoruz) ─── */
+    [data-testid="stSidebarNav"] { display: none !important; }
     /* ─── Sidebar: koyu mavi ─── */
     section[data-testid="stSidebar"] > div:first-child {
         background: linear-gradient(180deg, #1a237e 0%, #283593 100%);
@@ -34,6 +36,36 @@ def css_uygula() -> None:
     }
     section[data-testid="stSidebar"] .stButton > button:hover {
         background: rgba(255,255,255,0.28) !important;
+    }
+    /* ─── Sidebar nav links (Streamlit 1.36+) ─── */
+    section[data-testid="stSidebar"] a,
+    section[data-testid="stSidebar"] a * {
+        color: white !important;
+        text-decoration: none !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a,
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a span,
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a p,
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a div {
+        color: white !important;
+        background: transparent !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] {
+        border-radius: 8px !important;
+        background: rgba(255,255,255,0.08) !important;
+        margin-bottom: 2px !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stPageLink"]:hover,
+    section[data-testid="stSidebar"] [data-testid="stPageLink"]:hover a {
+        background: rgba(255,255,255,0.18) !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"],
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] * {
+        color: white !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover {
+        background: rgba(255,255,255,0.15) !important;
+        border-radius: 6px !important;
     }
     /* ─── Primary buttons: yeşil ─── */
     .stButton > button[kind="primary"],
@@ -96,6 +128,31 @@ LOGO_HTML = """
     </div>
 </div>
 """
+
+
+def sidebar_goster() -> None:
+    """Oturum açıkken tüm sayfalarda ortak sidebar'ı gösterir."""
+    k = st.session_state.get("kullanici")
+    if not k:
+        return
+    with st.sidebar:
+        st.markdown(LOGO_HTML, unsafe_allow_html=True)
+        tam_ad = k.get("tam_ad") or k.get("kullanici_adi", "")
+        giris_saati = st.session_state.get("giris_saati", "")
+        st.markdown(f"**👤 {tam_ad}**")
+        if giris_saati:
+            st.caption(f"🕐 Giriş: {giris_saati}")
+        st.divider()
+        st.page_link("app.py",             label="🏠 Ana Sayfa",        use_container_width=True)
+        st.page_link("pages/1_tarama.py",  label="📋 Sınav Oku",        use_container_width=True)
+        st.page_link("pages/2_sonuclar.py",label="📊 Geçmiş Taramalar", use_container_width=True)
+        st.page_link("pages/3_sablonlar.py",label="📐 Şablonlar",       use_container_width=True)
+        st.page_link("pages/4_ayarlar.py", label="⚙️ Ayarlar",          use_container_width=True)
+        st.divider()
+        if st.button("🚪 Çıkış Yap", use_container_width=True):
+            st.session_state.pop("kullanici", None)
+            st.session_state.pop("giris_saati", None)
+            st.rerun()
 
 
 def sil_butonu(btn_key: str, label: str = "Sil") -> None:
