@@ -26,16 +26,21 @@ def init_firebase() -> None:
     if firebase_admin._apps:
         return  # Zaten başlatılmış
 
-    # pydantic-settings + doğrudan os.getenv fallback (Railway uyumluluğu)
-    b64_val = settings.firebase_service_account_json_b64 or os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64", "")
-    json_val = settings.firebase_service_account_json or os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-    path_val = settings.firebase_service_account_path or os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+    # ÖNCELİK: os.getenv() → settings fallback (Railway güvenilirliği için)
+    b64_val = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64", "").strip()
+    if not b64_val:
+        b64_val = (settings.firebase_service_account_json_b64 or "").strip()
 
-    log.info("Firebase credential kontrol", extra={
-        "b64_var": bool(b64_val),
-        "json_var": bool(json_val),
-        "path_var": path_val or "(boş)",
-    })
+    json_val = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    if not json_val:
+        json_val = (settings.firebase_service_account_json or "").strip()
+
+    path_val = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "").strip()
+    if not path_val:
+        path_val = (settings.firebase_service_account_path or "").strip()
+
+    log.info("Firebase credential kontrol: b64=%s (len=%d), json=%s (len=%d), path=%s",
+             bool(b64_val), len(b64_val), bool(json_val), len(json_val), path_val or "(yok)")
 
     cred = None
 
@@ -43,7 +48,7 @@ def init_firebase() -> None:
     if b64_val:
         sa_dict = json.loads(base64.b64decode(b64_val).decode())
         cred = credentials.Certificate(sa_dict)
-        log.info("Firebase credential: base64 JSON")
+        log.info("Firebase credential: base64 JSON (len=%d)", len(b64_val))
 
     # 2) Düz JSON string
     elif json_val:
@@ -51,26 +56,21 @@ def init_firebase() -> None:
         cred = credentials.Certificate(sa_dict)
         log.info("Firebase credential: JSON string")
 
-    # 3) Dosya yolu
-    elif path_val:
-        sa_path = path_val
-        if not os.path.exists(sa_path):
-            log.error("Firebase service account dosyası bulunamadı", extra={"path": sa_path})
-            raise RuntimeError(
-                f"Firebase service account bulunamadı: {sa_path}\n"
-                "Çözüm seçenekleri:\n"
-                "  1) FIREBASE_SERVICE_ACCOUNT_JSON_B64 env var ayarlayın (Railway için)\n"
-                "  2) FIREBASE_SERVICE_ACCOUNT_JSON env var'ına JSON string yapıştırın\n"
-                "  3) FIREBASE_SERVICE_ACCOUNT_PATH ile doğru dosya yolunu belirtin\n"
-                "Dosyayı Firebase Console > Project Settings > Service Accounts'tan indirin."
-            )
-        cred = credentials.Certificate(sa_path)
-        log.info("Firebase credential: dosya", extra={"path": sa_path})
+    # 3) Dosya yolu (sadece boş değilse ve dosya varsa)
+    elif path_val and os.path.exists(path_val):
+        cred = credentials.Certificate(path_val)
+        log.info("Firebase credential: dosya (%s)", path_val)
+
     else:
+        # Detaylı debug bilgisi — Railway'de hangi env var'ların set olduğunu göster
+        all_env_keys = [k for k in os.environ if "FIREBASE" in k.upper() or "FIRE" in k.upper()]
         raise RuntimeError(
-            "Firebase service account yapılandırılmamış!\n"
-            "FIREBASE_SERVICE_ACCOUNT_JSON_B64, FIREBASE_SERVICE_ACCOUNT_JSON "
-            "veya FIREBASE_SERVICE_ACCOUNT_PATH ayarlanmalı."
+            f"Firebase service account yapılandırılmamış!\n"
+            f"DEBUG: b64_val={bool(b64_val)}, json_val={bool(json_val)}, path_val='{path_val}'\n"
+            f"DEBUG: FIREBASE ile ilgili env var'lar: {all_env_keys}\n"
+            f"DEBUG: os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON_B64') = "
+            f"{'SET (len={})'.format(len(os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON_B64', ''))) if os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON_B64') else 'NOT SET'}\n"
+            "Çözüm: Railway Variables'da FIREBASE_SERVICE_ACCOUNT_JSON_B64 ayarlayın."
         )
 
     firebase_admin.initialize_app(cred)

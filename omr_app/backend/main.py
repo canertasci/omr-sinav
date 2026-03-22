@@ -228,6 +228,24 @@ async def get_metrics():
     return JSONResponse(content=metrics.to_dict())
 
 
+@app.get("/debug/env-check", tags=["Sistem"], summary="Firebase env var teşhis")
+async def debug_env_check():
+    """Railway'de hangi Firebase env var'ların set olduğunu gösterir (değerleri GÖSTERMEz)."""
+    b64_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64", "")
+    json_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    path_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+    firebase_keys = [k for k in os.environ if "FIREBASE" in k.upper() or "FIRE" in k.upper()]
+    return {
+        "FIREBASE_SERVICE_ACCOUNT_JSON_B64": f"SET (len={len(b64_raw)})" if b64_raw else "NOT SET",
+        "FIREBASE_SERVICE_ACCOUNT_JSON": f"SET (len={len(json_raw)})" if json_raw else "NOT SET",
+        "FIREBASE_SERVICE_ACCOUNT_PATH": path_raw or "NOT SET",
+        "settings.firebase_service_account_json_b64": f"SET (len={len(settings.firebase_service_account_json_b64)})" if settings.firebase_service_account_json_b64 else "EMPTY",
+        "settings.firebase_service_account_path": settings.firebase_service_account_path,
+        "all_firebase_env_keys": firebase_keys,
+        "total_env_vars": len(os.environ),
+    }
+
+
 @app.get("/", tags=["Sistem"])
 async def root():
     return {
