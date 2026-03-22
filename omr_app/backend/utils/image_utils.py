@@ -8,7 +8,15 @@ import base64
 
 import cv2
 import numpy as np
-from fastapi import HTTPException
+try:
+    from fastapi import HTTPException
+except ImportError:
+    # Streamlit ortamında fastapi yok — basit ValueError kullan
+    class HTTPException(Exception):  # type: ignore[no-redef]
+        def __init__(self, status_code: int = 400, detail: str = ""):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
 
 # ─────────────────────────── Ön İşleme ───────────────────────────────────────
 
