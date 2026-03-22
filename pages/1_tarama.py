@@ -20,12 +20,13 @@ from utils_st.auth import giris_gerekli, mevcut_kullanici
 from utils_st.db import get_db
 from utils_st.excel import excel_detay, excel_ozet
 from utils_st.omr import get_gemini_key, kagit_oku_web
-from utils_st.ui import css_uygula
+from utils_st.ui import css_uygula, sidebar_goster
 
 giris_gerekli()
 
 st.set_page_config(page_title="Sınav Oku — OMR", layout="wide")
 css_uygula()
+sidebar_goster()
 
 kullanici = mevcut_kullanici()
 uid: int = kullanici["id"]
@@ -41,15 +42,15 @@ st.divider()
 
 try:
     with get_db() as con:
-        sablonlar  = con.execute(
+        sablonlar  = [tuple(r) for r in con.execute(
             "SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?", (uid,)
-        ).fetchall()
-        anahtarlar = con.execute(
+        ).fetchall()]
+        anahtarlar = [tuple(r) for r in con.execute(
             "SELECT id,ad,sablon_id,cevaplar FROM cevap_anahtarlari WHERE kullanici_id=?", (uid,)
-        ).fetchall()
-        listeler   = con.execute(
+        ).fetchall()]
+        listeler   = [tuple(r) for r in con.execute(
             "SELECT id,ad,ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?", (uid,)
-        ).fetchall()
+        ).fetchall()]
 
     if not sablonlar or not anahtarlar:
         st.warning("Önce **Şablon ve Cevap Anahtarı** sayfasından şablon ve cevap anahtarı ekleyin!")

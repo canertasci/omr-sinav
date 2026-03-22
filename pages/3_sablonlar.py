@@ -15,12 +15,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils_st.auth import giris_gerekli, mevcut_kullanici
 from utils_st.db import cache_temizle, get_db
-from utils_st.ui import css_uygula, sil_butonu, sil_onay_goster
+from utils_st.ui import css_uygula, sidebar_goster, sil_butonu, sil_onay_goster
 
 giris_gerekli()
 
 st.set_page_config(page_title="Şablon & Anahtar — OMR", layout="wide")
 css_uygula()
+sidebar_goster()
 
 kullanici = mevcut_kullanici()
 uid: int = kullanici["id"]
@@ -80,9 +81,11 @@ with tab_anahtar:
     st.header("Cevap Anahtarı")
     try:
         with get_db() as con:
-            sablonlar = con.execute(
-                "SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?", (uid,)
-            ).fetchall()
+            sablonlar = [
+                tuple(r) for r in con.execute(
+                    "SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?", (uid,)
+                ).fetchall()
+            ]
 
         if not sablonlar:
             st.warning("Önce şablon ekleyin!")
