@@ -9,7 +9,7 @@ import base64
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from services.gemini_service import gemini_cagir
 from utils.image_utils import kucult_ve_base64 as _kucult_b64, on_isleme
@@ -72,7 +72,10 @@ def aruco_tespit(cv_img: np.ndarray) -> dict | None:
 
     gri = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
     corners, ids, _ = ARUCO_DETEK.detectMarkers(gri)
+    bulunan = ids.flatten().tolist() if ids is not None else []
+    log.info("ArUco algılama", extra={"bulunan_ids": bulunan, "toplam": len(bulunan), "boyut": f"{w}x{h}"})
     if ids is None or len(ids) < 3:
+        log.warning("Yetersiz ArUco marker", extra={"bulunan": len(bulunan), "gerekli": 3})
         return None
 
     markerlar: dict[int, np.ndarray] = {}
@@ -253,6 +256,9 @@ def kagit_oku(
 
     try:
         pil_img = Image.open(io.BytesIO(goruntu_bytes))
+        # Telefon kamerası EXIF rotasyon bilgisi ekler — PIL bunu otomatik uygulamaz.
+        # exif_transpose görüntüyü doğru yönde döndürür, marker algılama için kritik.
+        pil_img = ImageOps.exif_transpose(pil_img)
     except Exception as exc:
         log.warning("Görüntü açılamadı", extra={"hata": str(exc)})
         return {
@@ -265,9 +271,8 @@ def kagit_oku(
         }
 
     cv_img = pil_to_cv(pil_img)
-    # NOT: on_isleme (CLAHE+deskew) ArUco ve Gemini okumasını bozabiliyor.
-    # Orijinal renkli görüntü üzerinde çalışıyoruz.
-    # cv_img = on_isleme(cv_img)
+    h, w = cv_img.shape[:2]
+    log.info("Görüntü boyutu", extra={"genislik": w, "yukseklik": h, "format": pil_img.format})
     markerlar = aruco_tespit(cv_img)
     kismi_algilama: bool = isinstance(markerlar, dict) and bool(markerlar.pop("kismi_algilama", False))
 
