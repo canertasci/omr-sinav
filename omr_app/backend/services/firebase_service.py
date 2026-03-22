@@ -26,25 +26,34 @@ def init_firebase() -> None:
     if firebase_admin._apps:
         return  # Zaten başlatılmış
 
+    # pydantic-settings + doğrudan os.getenv fallback (Railway uyumluluğu)
+    b64_val = settings.firebase_service_account_json_b64 or os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64", "")
+    json_val = settings.firebase_service_account_json or os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    path_val = settings.firebase_service_account_path or os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+
+    log.info("Firebase credential kontrol", extra={
+        "b64_var": bool(b64_val),
+        "json_var": bool(json_val),
+        "path_var": path_val or "(boş)",
+    })
+
     cred = None
 
     # 1) Base64 encoded JSON (Railway/Render için önerilen)
-    if settings.firebase_service_account_json_b64:
-        sa_dict = json.loads(
-            base64.b64decode(settings.firebase_service_account_json_b64).decode()
-        )
+    if b64_val:
+        sa_dict = json.loads(base64.b64decode(b64_val).decode())
         cred = credentials.Certificate(sa_dict)
         log.info("Firebase credential: base64 JSON")
 
     # 2) Düz JSON string
-    elif settings.firebase_service_account_json:
-        sa_dict = json.loads(settings.firebase_service_account_json)
+    elif json_val:
+        sa_dict = json.loads(json_val)
         cred = credentials.Certificate(sa_dict)
         log.info("Firebase credential: JSON string")
 
     # 3) Dosya yolu
-    elif settings.firebase_service_account_path:
-        sa_path = settings.firebase_service_account_path
+    elif path_val:
+        sa_path = path_val
         if not os.path.exists(sa_path):
             log.error("Firebase service account dosyası bulunamadı", extra={"path": sa_path})
             raise RuntimeError(
