@@ -142,7 +142,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-from utils_st.ui import css_uygula, sidebar_goster
+try:
+    from utils_st.ui import css_uygula, sidebar_goster
+except Exception as _imp_err:
+    import traceback as _tb
+    st.error(f"Import hatası: {_imp_err}")
+    st.code(_tb.format_exc())
+    st.stop()
 
 db_olustur()
 css_uygula()  # her zaman uygula — login sayfasında da nav'ı gizlemek için
