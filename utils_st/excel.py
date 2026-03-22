@@ -100,7 +100,40 @@ def excel_detay(sonuclar: list[dict], cevap_anahtari: dict, soru_sayisi: int = 2
 
 
 def _xls_to_xlsx(xls_bytes: bytes) -> bytes:
-    """Eski .xls dosyasını .xlsx'e dönüştürür (xlrd → openpyxl)."""
+    """
+    Eski .xls dosyasını .xlsx'e dönüştürür.
+    Birçok üniversite sistemi .xls uzantılı HTML dosyası verir —
+    bu durumu otomatik algılayıp pandas read_html ile okur.
+    """
+    import pandas as pd
+
+    # HTML olarak kaydedilmiş .xls dosyasını algıla
+    header = xls_bytes[:50].lower()
+    if b"<html" in header or b"<?xml" in header or b"<table" in header:
+        # HTML tablosunu pandas ile oku
+        html_str = xls_bytes.decode("utf-8", errors="ignore")
+        tables = pd.read_html(html_str)
+        if not tables:
+            raise ValueError("HTML dosyasında tablo bulunamadı.")
+
+        # En büyük tabloyu al (genellikle öğrenci listesi)
+        df = max(tables, key=len)
+
+        xlsx_wb = Workbook()
+        xlsx_ws = xlsx_wb.active
+        # Başlıkları yaz
+        for col_idx, col_name in enumerate(df.columns, 1):
+            xlsx_ws.cell(row=1, column=col_idx, value=col_name)
+        # Verileri yaz
+        for row_idx, row in enumerate(df.itertuples(index=False), 2):
+            for col_idx, val in enumerate(row, 1):
+                xlsx_ws.cell(row=row_idx, column=col_idx, value=val)
+
+        buf = BytesIO()
+        xlsx_wb.save(buf)
+        return buf.getvalue()
+
+    # Gerçek .xls dosyası — xlrd ile oku
     import xlrd
 
     xls_wb = xlrd.open_workbook(file_contents=xls_bytes)

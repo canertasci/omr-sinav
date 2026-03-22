@@ -234,8 +234,16 @@ with tab_liste:
             adi_l    = st.text_input("Liste Adı", key="liste_adi")
             yuklenen_l = st.file_uploader("Excel Dosyası", type=["xlsx", "xls"], key="liste_yukle")
             if yuklenen_l and adi_l and st.button("Listeyi Kaydet", type="primary", key="liste_kaydet"):
-                engine = "openpyxl" if yuklenen_l.name.endswith(".xlsx") else "xlrd"
-                df = pd.read_excel(yuklenen_l, header=None, engine=engine)
+                raw = yuklenen_l.read()
+                header_check = raw[:50].lower()
+                if b"<html" in header_check or b"<?xml" in header_check or b"<table" in header_check:
+                    # HTML olarak kaydedilmiş .xls dosyası
+                    html_str = raw.decode("utf-8", errors="ignore")
+                    tables = pd.read_html(html_str)
+                    df = max(tables, key=len)
+                else:
+                    engine = "openpyxl" if yuklenen_l.name.endswith(".xlsx") else "xlrd"
+                    df = pd.read_excel(BytesIO(raw), header=None, engine=engine)
                 ogrenciler = [
                     {"no": str(r[0]).strip(), "ad": str(r[1]).strip()}
                     for _, r in df.iterrows()
