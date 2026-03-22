@@ -265,7 +265,9 @@ def kagit_oku(
         }
 
     cv_img = pil_to_cv(pil_img)
-    cv_img = on_isleme(cv_img)  # Kontrast + deskew iyileştirme
+    # NOT: on_isleme (CLAHE+deskew) ArUco ve Gemini okumasını bozabiliyor.
+    # Orijinal renkli görüntü üzerinde çalışıyoruz.
+    # cv_img = on_isleme(cv_img)
     markerlar = aruco_tespit(cv_img)
     kismi_algilama: bool = isinstance(markerlar, dict) and bool(markerlar.pop("kismi_algilama", False))
 

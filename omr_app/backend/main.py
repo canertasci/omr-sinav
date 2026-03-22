@@ -249,6 +249,29 @@ async def debug_env_check():
     }
 
 
+@app.get("/debug/test-gemini", tags=["Sistem"], summary="Gemini API bağlantı testi")
+async def debug_test_gemini(api_key: str = ""):
+    """Gemini API'nin çalışıp çalışmadığını test eder (basit metin isteği)."""
+    import requests as _req
+    key = api_key or os.getenv("GEMINI_API_KEY", "") or settings.gemini_api_key
+    if not key:
+        return {"durum": "HATA", "mesaj": "API key yok. ?api_key=YOUR_KEY ile deneyin."}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
+    body = {
+        "contents": [{"parts": [{"text": "Sadece 'merhaba' yaz, başka bir şey yazma."}]}],
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 10},
+    }
+    try:
+        resp = _req.post(url, json=body, timeout=15)
+        if resp.status_code == 200:
+            text = resp.json()["candidates"][0]["content"]["parts"][-1].get("text", "")
+            return {"durum": "OK", "gemini_yanit": text.strip(), "model": "gemini-2.5-flash"}
+        else:
+            return {"durum": "HATA", "status_code": resp.status_code, "detay": resp.text[:500]}
+    except Exception as exc:
+        return {"durum": "HATA", "mesaj": str(exc)}
+
+
 @app.get("/", tags=["Sistem"])
 async def root():
     return {
