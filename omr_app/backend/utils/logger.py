@@ -11,8 +11,12 @@ import uuid
 from contextvars import ContextVar
 from typing import Any
 
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+try:
+    from fastapi import Request, Response
+    from starlette.middleware.base import BaseHTTPMiddleware
+    _HAS_FASTAPI = True
+except ImportError:
+    _HAS_FASTAPI = False
 
 # ─── Request ID context variable ─────────────────────────────────────────────
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -81,37 +85,38 @@ def setup_root_logger(level: str = "INFO") -> None:
 
 # ─── Request Timing Middleware ────────────────────────────────────────────────
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Her HTTP isteğine correlation ID atar, süreyi loglar."""
+if _HAS_FASTAPI:
+    class RequestLoggingMiddleware(BaseHTTPMiddleware):
+        """Her HTTP isteğine correlation ID atar, süreyi loglar."""
 
-    def __init__(self, app, logger_name: str = "omr.http"):
-        super().__init__(app)
-        self._log = get_logger(logger_name)
+        def __init__(self, app, logger_name: str = "omr.http"):
+            super().__init__(app)
+            self._log = get_logger(logger_name)
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        rid = str(uuid.uuid4())[:8]
-        token = request_id_var.set(rid)
+        async def dispatch(self, request: Request, call_next) -> Response:
+            rid = str(uuid.uuid4())[:8]
+            token = request_id_var.set(rid)
 
-        start = time.perf_counter()
-        response = None
-        try:
-            response = await call_next(request)
-        except Exception:
-            raise
-        finally:
-            elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
-            status = response.status_code if response is not None else 500
-            self._log.info(
-                f"{request.method} {request.url.path} {status}",
-                extra={
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status": status,
-                    "ms": elapsed_ms,
-                    "request_id": rid,
-                },
-            )
-            request_id_var.reset(token)
+            start = time.perf_counter()
+            response = None
+            try:
+                response = await call_next(request)
+            except Exception:
+                raise
+            finally:
+                elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+                status = response.status_code if response is not None else 500
+                self._log.info(
+                    f"{request.method} {request.url.path} {status}",
+                    extra={
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status": status,
+                        "ms": elapsed_ms,
+                        "request_id": rid,
+                    },
+                )
+                request_id_var.reset(token)
 
-        response.headers["X-Request-ID"] = rid
-        return response
+            response.headers["X-Request-ID"] = rid
+            return response
