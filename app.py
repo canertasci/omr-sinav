@@ -142,25 +142,25 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+from utils_st.ui import css_uygula, sidebar_goster
+
 db_olustur()
+css_uygula()  # her zaman uygula — login sayfasında da nav'ı gizlemek için
 
 if "kullanici" not in st.session_state:
+    # Giriş yapılmamışken sidebar navigasyonu tamamen gizle
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarNav"] { display: none !important; }
+    [data-testid="stSidebarNavItems"] { display: none !important; }
+    header [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
     giris_sayfasi()
 else:
-    from utils_st.ui import css_uygula, LOGO_HTML
-    css_uygula()
+    sidebar_goster()
     k = st.session_state.kullanici
-    with st.sidebar:
-        st.markdown(LOGO_HTML, unsafe_allow_html=True)
-        tam_ad = k["tam_ad"] or k["kullanici_adi"]
-        giris_saati = st.session_state.get("giris_saati", "")
-        st.markdown(f"**👤 {tam_ad}**")
-        if giris_saati:
-            st.caption(f"🕐 Giriş: {giris_saati}")
-        st.divider()
-        if st.button("🚪 Çıkış Yap", use_container_width=True):
-            del st.session_state.kullanici
-            st.rerun()
 
     # ─── Dashboard İçeriği ───────────────────────────────────
     st.header("Ana Sayfa")

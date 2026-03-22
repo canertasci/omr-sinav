@@ -32,11 +32,10 @@ def giris_kontrol(kullanici_adi: str, sifre: str) -> dict | None:
 def giris_gerekli() -> bool:
     """
     Giriş yapılmış mı kontrol eder.
-    Yapılmamışsa uyarı gösterir ve True döner (sayfayı durdur).
+    Yapılmamışsa ana sayfaya (login formuna) yönlendirir.
     """
     if "kullanici" not in st.session_state or not st.session_state.kullanici:
-        st.warning("Bu sayfayı görmek için giriş yapmanız gerekiyor.")
-        st.stop()
+        st.switch_page("app.py")
         return True
     return False
 
