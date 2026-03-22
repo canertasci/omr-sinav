@@ -6,6 +6,7 @@ pandas
 pdf2image
 Pillow
 openpyxl
+xlrd
 bcrypt
 pydantic
 pydantic-settings
