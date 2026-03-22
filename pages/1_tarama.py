@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils_st.auth import giris_gerekli, mevcut_kullanici
 from utils_st.db import get_db
-from utils_st.excel import excel_detay, excel_ozet
+from utils_st.excel import excel_detay, excel_ozet, excel_not_girisi
 from utils_st.omr import get_gemini_key, kagit_oku_web
 from utils_st.ui import css_uygula, sidebar_goster
 
@@ -191,6 +191,57 @@ try:
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
+
+        # ─── Üniversite Not Giriş Sistemi ────────────────────────────
+        st.divider()
+        st.subheader("🎓 Üniversite Not Giriş Dosyasına Aktar")
+        st.caption(
+            "Üniversitenin not giriş Excel dosyasını yükleyin. "
+            "Öğrenci numaralarına göre eşleştirme yapılır ve GR yerine puanlar yazılır."
+        )
+
+        col_dosya, col_tur = st.columns([3, 1])
+        with col_dosya:
+            uni_excel = st.file_uploader(
+                "Üniversite Not Giriş Excel Dosyası",
+                type=["xlsx", "xls"],
+                key="uni_excel_upload",
+            )
+        with col_tur:
+            not_turu = st.selectbox("Not Türü", ["Vize", "Final"], key="not_turu_sec")
+
+        if uni_excel:
+            try:
+                dolmus_excel, eslesen, toplam = excel_not_girisi(
+                    uni_excel.read(), sonuclar, not_turu
+                )
+                if eslesen > 0:
+                    st.success(
+                        f"✅ **{toplam}** öğrenciden **{eslesen}** tanesi eşleşti ve "
+                        f"**{not_turu}** notu girildi."
+                    )
+                    if eslesen < toplam:
+                        st.warning(
+                            f"⚠️ {toplam - eslesen} öğrenci eşleşmedi — "
+                            f"öğrenci numaraları tarama sonuçlarıyla uyuşmuyor olabilir."
+                        )
+                    st.download_button(
+                        f"📥 {not_turu} Notları Girilmiş Excel İndir",
+                        dolmus_excel,
+                        f"not_girisi_{not_turu.lower()}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        type="primary",
+                    )
+                else:
+                    st.error(
+                        "❌ Hiçbir öğrenci eşleşmedi! "
+                        "Öğrenci numaralarının doğru okunduğundan emin olun."
+                    )
+            except ValueError as ve:
+                st.error(f"❌ {ve}")
+            except Exception as e:
+                st.error(f"Dosya işlenirken hata: {e}")
 
 except Exception as e:
     st.error(f"Hata: {e}")
