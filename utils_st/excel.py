@@ -99,10 +99,31 @@ def excel_detay(sonuclar: list[dict], cevap_anahtari: dict, soru_sayisi: int = 2
     return buf.getvalue()
 
 
+def _xls_to_xlsx(xls_bytes: bytes) -> bytes:
+    """Eski .xls dosyasını .xlsx'e dönüştürür (xlrd → openpyxl)."""
+    import xlrd
+
+    xls_wb = xlrd.open_workbook(file_contents=xls_bytes)
+    xls_ws = xls_wb.sheet_by_index(0)
+
+    xlsx_wb = Workbook()
+    xlsx_ws = xlsx_wb.active
+
+    for row_idx in range(xls_ws.nrows):
+        for col_idx in range(xls_ws.ncols):
+            cell = xls_ws.cell(row_idx, col_idx)
+            xlsx_ws.cell(row=row_idx + 1, column=col_idx + 1, value=cell.value)
+
+    buf = BytesIO()
+    xlsx_wb.save(buf)
+    return buf.getvalue()
+
+
 def excel_not_girisi(
     sablon_bytes: bytes,
     sonuclar: list[dict],
     not_turu: str = "Vize",
+    dosya_adi: str = "",
 ) -> tuple[bytes, int, int]:
     """
     Üniversite not giriş Excel şablonuna OMR puanlarını yazar.
@@ -111,10 +132,15 @@ def excel_not_girisi(
         sablon_bytes: Orijinal Excel dosyası (bytes)
         sonuclar: OMR tarama sonuçları listesi
         not_turu: "Vize" veya "Final" — hangi sütuna yazılacak
+        dosya_adi: Orijinal dosya adı (.xls/.xlsx tespiti için)
 
     Returns:
         (doldurulmuş_excel_bytes, eşleşen_sayı, toplam_öğrenci_sayısı)
     """
+    # .xls dosyasını .xlsx'e dönüştür
+    if dosya_adi.lower().endswith(".xls") and not dosya_adi.lower().endswith(".xlsx"):
+        sablon_bytes = _xls_to_xlsx(sablon_bytes)
+
     wb = load_workbook(BytesIO(sablon_bytes))
     ws = wb.active
 

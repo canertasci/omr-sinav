@@ -213,7 +213,8 @@ try:
         if uni_excel:
             try:
                 dolmus_excel, eslesen, toplam = excel_not_girisi(
-                    uni_excel.read(), sonuclar, not_turu
+                    uni_excel.read(), sonuclar, not_turu,
+                    dosya_adi=uni_excel.name,
                 )
                 if eslesen > 0:
                     st.success(
