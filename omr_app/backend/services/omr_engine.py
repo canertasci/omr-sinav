@@ -204,6 +204,7 @@ def cevap_oku(bolge_img: np.ndarray, soru_bas: int, soru_bit: int, api_key: str)
 # ─────────────────────────── Bilgi Okuma ─────────────────────────────
 
 PROMPT_BILGI = prompts.OGRENCI_BILGI
+PROMPT_GRUP = prompts.SINAV_GRUBU
 
 
 def bilgi_oku(bolge_img: np.ndarray, api_key: str) -> dict[str, str]:
@@ -240,16 +241,28 @@ def puanla(
 
 # ─────────────────────────── Ana Pipeline ────────────────────────────
 
+def sinav_grubu_oku(bolge_img: np.ndarray, api_key: str) -> str | None:
+    """Sol üst bölgeden sınav grubunu (A/B/C/D) tespit eder."""
+    sonuc = gemini_cagir(bolge_img, PROMPT_GRUP, api_key)
+    if isinstance(sonuc, dict) and "hata" not in sonuc:
+        tespit = str(sonuc.get("sinav_grubu", "YOK")).strip().upper()
+        if tespit in ("A", "B", "C", "D"):
+            return tespit
+    return None
+
+
 def kagit_oku(
     goruntu_bytes: bytes,
     cevap_anahtari: dict,
     api_key: str,
     soru_sayisi: int = 20,
+    grup_anahtarlari: dict[str, dict] | None = None,
 ) -> dict:
     """
     goruntu_bytes : bytes (JPEG / PNG / HEIC-converted)
-    cevap_anahtari: {1: "A", 2: "C", ...}  ya da {"1": "A", ...}
-    Döner         : dict (ogrenci_no, ad_soyad, cevaplar, dogru, yanlis, bos, puan, guvenskor, hata)
+    cevap_anahtari: {1: "A", 2: "C", ...}  ya da {"1": "A", ...}  — varsayılan anahtar
+    grup_anahtarlari: {"A": {1: "A", ...}, "B": {...}} — grup bazlı anahtarlar (opsiyonel)
+    Döner         : dict (ogrenci_no, ad_soyad, sinav_grubu, cevaplar, dogru, yanlis, bos, puan, guvenskor, hata)
     """
     # Anahtarların int olduğundan emin ol
     anahtar_int: dict[int, str] = {int(k): str(v).upper() for k, v in cevap_anahtari.items()}
@@ -304,6 +317,17 @@ def kagit_oku(
     bilgi = bilgi_oku(bolgeler[0], api_key)
     ogrenci_no = ogrenci_no_oku(bolgeler[1], api_key)
 
+    # Sınav grubu tespiti (sadece grup anahtarları varsa)
+    sinav_grubu: str | None = None
+    if grup_anahtarlari:
+        sinav_grubu = sinav_grubu_oku(bolgeler[0], api_key)
+        log.info("Sınav grubu tespiti", extra={"sinav_grubu": sinav_grubu})
+
+    # Doğru cevap anahtarını seç
+    kullanilan_anahtar = anahtar_int
+    if sinav_grubu and grup_anahtarlari and sinav_grubu in grup_anahtarlari:
+        kullanilan_anahtar = {int(k): str(v).upper() for k, v in grup_anahtarlari[sinav_grubu].items()}
+
     orta = soru_sayisi // 2
     cevaplar: dict[int, str] = {}
 
@@ -321,7 +345,7 @@ def kagit_oku(
         log.error("Sağ cevap bölgesi okunamadı", extra={"hata": str(exc)})
         cevaplar.update({i: "HATA" for i in range(orta + 1, soru_sayisi + 1)})
 
-    dogru, yanlis, bos, puan = puanla(cevaplar, anahtar_int, soru_sayisi)
+    dogru, yanlis, bos, puan = puanla(cevaplar, kullanilan_anahtar, soru_sayisi)
 
     hata_sayisi = sum(1 for v in cevaplar.values() if v in ("HATA", "?"))
     guvenskor = round(1.0 - (hata_sayisi / soru_sayisi), 2)
@@ -331,6 +355,7 @@ def kagit_oku(
         "ad_soyad": bilgi.get("ad_soyad", "?"),
         "bolum": bilgi.get("bolum", "?"),
         "ders": bilgi.get("ders", "?"),
+        "sinav_grubu": sinav_grubu,
         "cevaplar": {str(k): v for k, v in cevaplar.items()},
         "dogru": dogru,
         "yanlis": yanlis,

@@ -23,6 +23,17 @@ SADECE JSON dön:
 {"ad_soyad": "Ad Soyad", "bolum": "Bölüm", "ders": "Ders"}
 """
 
+SINAV_GRUBU = """
+Bu görüntüde öğrenci bilgi formu ve altında "Sınav Grubu" bölümü var.
+Sınav Grubu kısmında A, B, C, D seçenekleri var (checkbox/balon).
+Öğrenci bu balonlardan BİRİNİ doldurmuş olmalı.
+- Dolu balon = tamamen siyah veya koyu dolgulu daire.
+- Hangi balon doluysa o grubu döndür.
+- Hiçbiri dolu değilse veya bölüm yoksa "YOK" döndür.
+SADECE JSON dön:
+{"sinav_grubu": "A"}
+"""
+
 
 def cevap_balonlari(soru_bas: int, soru_bit: int) -> str:
     """Belirtilen soru aralığı için cevap okuma prompt'u."""

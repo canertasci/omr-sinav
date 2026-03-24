@@ -46,7 +46,7 @@ try:
             "SELECT id,ad,soru_sayisi FROM sablonlar WHERE kullanici_id=?", (uid,)
         ).fetchall()]
         anahtarlar = [tuple(r) for r in con.execute(
-            "SELECT id,ad,sablon_id,cevaplar FROM cevap_anahtarlari WHERE kullanici_id=?", (uid,)
+            "SELECT id,ad,sablon_id,cevaplar,grup FROM cevap_anahtarlari WHERE kullanici_id=?", (uid,)
         ).fetchall()]
         listeler   = [tuple(r) for r in con.execute(
             "SELECT id,ad,ogrenciler FROM ogrenci_listeleri WHERE kullanici_id=?", (uid,)
@@ -58,8 +58,29 @@ try:
 
     c1, c2 = st.columns(2)
     with c1:
-        sablon  = st.selectbox("Şablon", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
-        anahtar = st.selectbox("Cevap Anahtarı", anahtarlar, format_func=lambda x: x[1])
+        sablon = st.selectbox("Şablon", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
+        # Seçili şablona ait anahtarları filtrele
+        sablon_anahtarlari = [a for a in anahtarlar if a[2] == sablon[0]]
+        if not sablon_anahtarlari:
+            st.warning("Bu şablon için cevap anahtarı bulunamadı!")
+            st.stop()
+
+        # Gruplu anahtarlar var mı kontrol et
+        gruplu_anahtarlar = [a for a in sablon_anahtarlari if a[4] is not None]
+        grupsuz_anahtarlar = [a for a in sablon_anahtarlari if a[4] is None]
+
+        if gruplu_anahtarlar:
+            # Gruplu mod: kullanıcıya bilgi ver
+            mevcut_gruplar = sorted(set(a[4] for a in gruplu_anahtarlar))
+            st.info(f"Gruplu cevap anahtarları mevcut: **{', '.join(mevcut_gruplar)}**. "
+                    f"Sınav grubu kağıttan otomatik tespit edilecek.")
+            # İlk grupsuz veya ilk gruplu anahtarı varsayılan olarak seç
+            anahtar = grupsuz_anahtarlar[0] if grupsuz_anahtarlar else gruplu_anahtarlar[0]
+        else:
+            anahtar = st.selectbox(
+                "Cevap Anahtarı", sablon_anahtarlari,
+                format_func=lambda x: x[1],
+            )
     with c2:
         liste = st.selectbox(
             "Öğrenci Listesi (opsiyonel)", [None] + list(listeler),
@@ -85,6 +106,15 @@ try:
     if pdf and api_key and st.button("Sınavı Oku", type="primary", use_container_width=True):
         anahtardict: dict[int, str] = {int(k): v for k, v in json.loads(anahtar[3]).items()}
         ss: int = sablon[2]
+
+        # Grup anahtarlarını hazırla
+        grup_anahtarlari: dict[str, dict[int, str]] | None = None
+        if gruplu_anahtarlar:
+            grup_anahtarlari = {}
+            for ga in gruplu_anahtarlar:
+                grup_harf = ga[4]  # "A", "B", "C", "D"
+                grup_anahtarlari[grup_harf] = {int(k): v for k, v in json.loads(ga[3]).items()}
+
         og_dict: dict[str, str] = {}
         if liste:
             og_dict = {o["no"]: o["ad"] for o in json.loads(liste[2])}
@@ -110,7 +140,7 @@ try:
         with st.spinner("Sayfalar Gemini ile okunuyor..."):
             for i, sayfa in enumerate(sayfalar, 1):
                 durum.write(f"Sayfa {i}/{toplam} okunuyor...")
-                s, hata = kagit_oku_web(sayfa, anahtardict, api_key, ss)
+                s, hata = kagit_oku_web(sayfa, anahtardict, api_key, ss, grup_anahtarlari)
                 if hata:
                     sonuclar.append({
                         "sayfa": i, "hata": hata, "durum": "Hata",
@@ -148,11 +178,12 @@ try:
             for s in sonuclar:
                 con.execute(
                     "INSERT INTO tarama_sonuclari (tarama_id,sayfa,ad_soyad,ogrenci_no,"
-                    "cevaplar,dogru,yanlis,bos,puan,durum,hata) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    "cevaplar,dogru,yanlis,bos,puan,durum,hata,sinav_grubu) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (tarama_id, s.get("sayfa"), s.get("ad_soyad", "?"),
                      s.get("ogrenci_no", "?"), json.dumps(s.get("cevaplar", {})),
                      s.get("dogru", 0), s.get("yanlis", 0), s.get("bos", 0),
-                     s.get("puan", 0), s.get("durum", ""), s.get("hata")),
+                     s.get("puan", 0), s.get("durum", ""), s.get("hata"),
+                     s.get("sinav_grubu")),
                 )
 
         st.session_state.sonuclar    = sonuclar
@@ -168,15 +199,46 @@ try:
         ss          = st.session_state.ss
 
         st.subheader("Sonuçlar")
-        df_data = [
-            {
-                "Sayfa": s.get("sayfa"), "Ad Soyad": s.get("ad_soyad"),
-                "No": s.get("ogrenci_no"), "Durum": s.get("durum"),
-                "Doğru": s.get("dogru"), "Yanlış": s.get("yanlis"), "Puan": s.get("puan"),
+        # Grup bilgisi varsa tabloya ekle
+        herhangi_grup = any(s.get("sinav_grubu") for s in sonuclar)
+        df_data = []
+        for s in sonuclar:
+            satir: dict[str, Any] = {
+                "Sayfa": s.get("sayfa"),
+                "Ad Soyad": s.get("ad_soyad"),
+                "No": s.get("ogrenci_no"),
             }
-            for s in sonuclar
-        ]
+            if herhangi_grup:
+                satir["Grup"] = s.get("sinav_grubu", "-")
+            satir.update({
+                "Durum": s.get("durum"),
+                "Doğru": s.get("dogru"),
+                "Yanlış": s.get("yanlis"),
+                "Puan": s.get("puan"),
+            })
+            df_data.append(satir)
         st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+
+        # Grup bazında özet (varsa)
+        if herhangi_grup:
+            st.subheader("Grup Bazında Özet")
+            grup_sonuc: dict[str, list] = {}
+            for s in sonuclar:
+                g = s.get("sinav_grubu", "Bilinmiyor")
+                if g not in grup_sonuc:
+                    grup_sonuc[g] = []
+                grup_sonuc[g].append(s.get("puan", 0))
+            ozet_data = []
+            for g in sorted(grup_sonuc.keys()):
+                puanlar = grup_sonuc[g]
+                ozet_data.append({
+                    "Grup": g if g else "Bilinmiyor",
+                    "Öğrenci Sayısı": len(puanlar),
+                    "Ortalama Puan": round(sum(puanlar) / len(puanlar), 1) if puanlar else 0,
+                    "En Yüksek": max(puanlar) if puanlar else 0,
+                    "En Düşük": min(puanlar) if puanlar else 0,
+                })
+            st.dataframe(pd.DataFrame(ozet_data), use_container_width=True, hide_index=True)
 
         c1, c2 = st.columns(2)
         with c1:

@@ -44,7 +44,8 @@ def db_olustur() -> None:
         "CREATE TABLE IF NOT EXISTS cevap_anahtarlari ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "kullanici_id INTEGER, sablon_id INTEGER,"
-        "ad TEXT NOT NULL, cevaplar TEXT NOT NULL,"
+        "ad TEXT NOT NULL, grup TEXT DEFAULT NULL,"
+        "cevaplar TEXT NOT NULL,"
         "tarih TIMESTAMP DEFAULT CURRENT_TIMESTAMP);"
         "CREATE TABLE IF NOT EXISTS ogrenci_listeleri ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -61,8 +62,19 @@ def db_olustur() -> None:
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "tarama_id INTEGER, sayfa INTEGER, ad_soyad TEXT,"
         "ogrenci_no TEXT, cevaplar TEXT, dogru INTEGER, yanlis INTEGER,"
-        "bos INTEGER, puan REAL, durum TEXT, hata TEXT);"
+        "bos INTEGER, puan REAL, durum TEXT, hata TEXT,"
+        "sinav_grubu TEXT DEFAULT NULL);"
     )
+    # Migration: mevcut DB'lere yeni sütunları ekle
+    for _mig in [
+        "ALTER TABLE cevap_anahtarlari ADD COLUMN grup TEXT DEFAULT NULL",
+        "ALTER TABLE tarama_sonuclari ADD COLUMN sinav_grubu TEXT DEFAULT NULL",
+    ]:
+        try:
+            con.execute(_mig)
+        except sqlite3.OperationalError:
+            pass  # sütun zaten var
+
     _admin_sifre = os.getenv("ADMIN_INITIAL_PASSWORD", "")
     if _admin_sifre:
         _hash = bcrypt.hashpw(_admin_sifre.encode(), bcrypt.gensalt()).decode()

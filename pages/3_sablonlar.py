@@ -93,7 +93,18 @@ with tab_anahtar:
 
         sablon  = st.selectbox("Şablon Seç", sablonlar, format_func=lambda x: f"{x[1]} ({x[2]} soru)")
         ss_a    = sablon[2]
-        adi_a   = st.text_input("Cevap Anahtarı Adı (örn: Vize 2025)", key="anahtar_adi_input")
+
+        col_adi, col_grup = st.columns([3, 1])
+        with col_adi:
+            adi_a = st.text_input("Cevap Anahtarı Adı (örn: Vize 2025)", key="anahtar_adi_input")
+        with col_grup:
+            grup_sec = st.selectbox(
+                "Sınav Grubu",
+                ["Tek Grup (Grupsuz)", "A", "B", "C", "D"],
+                key="grup_sec",
+                help="Birden fazla sınav grubu varsa her grup için ayrı anahtar girin.",
+            )
+        grup_val = None if grup_sec.startswith("Tek") else grup_sec
 
         tab1, tab2 = st.tabs(["✏️ Manuel Giriş", "📂 Dosyadan Yükle"])
         cevaplar: dict[int, str] = {}
@@ -141,25 +152,36 @@ with tab_anahtar:
 
         if st.button("Anahtarı Kaydet", type="primary", key="anahtar_kaydet"):
             if adi_a:
+                # Aynı şablon + grup kombinasyonu varsa uyar
                 with get_db() as con:
+                    if grup_val:
+                        var_mi = con.execute(
+                            "SELECT id FROM cevap_anahtarlari WHERE sablon_id=? AND grup=? AND kullanici_id=?",
+                            (sablon[0], grup_val, uid),
+                        ).fetchone()
+                        if var_mi:
+                            st.warning(f"Bu şablon için Grup {grup_val} anahtarı zaten var! Önce eskisini silin.")
+                            st.stop()
                     con.execute(
-                        "INSERT INTO cevap_anahtarlari (kullanici_id,sablon_id,ad,cevaplar) VALUES (?,?,?,?)",
-                        (uid, sablon[0], adi_a, json.dumps(cevaplar)),
+                        "INSERT INTO cevap_anahtarlari (kullanici_id,sablon_id,ad,grup,cevaplar) VALUES (?,?,?,?,?)",
+                        (uid, sablon[0], adi_a, grup_val, json.dumps(cevaplar)),
                     )
-                st.success(f"'{adi_a}' kaydedildi!")
+                st.success(f"'{adi_a}'{' (Grup ' + grup_val + ')' if grup_val else ''} kaydedildi!")
+                st.rerun()
             else:
                 st.warning("Cevap anahtarı adı girin!")
 
         st.subheader("Kayıtlı Anahtarlar")
         with get_db() as con:
             rows_a = con.execute(
-                "SELECT id,ad,sablon_id,cevaplar,tarih FROM cevap_anahtarlari "
+                "SELECT id,ad,sablon_id,cevaplar,tarih,grup FROM cevap_anahtarlari "
                 "WHERE kullanici_id=? ORDER BY id DESC", (uid,)
             ).fetchall()
 
         for r in rows_a:
+            grup_goster = f" **[Grup {r[5]}]**" if r[5] else ""
             c1, c2, c3, c4 = st.columns([4, 2, 1, 1])
-            c1.write(f"**{r[1]}**")
+            c1.write(f"**{r[1]}**{grup_goster}")
             c2.write(r[4][:16])
             duzenle_key = f"duzenle_{r[0]}"
             if c3.button("✏️", key=f"btn_{duzenle_key}", help="Düzenle"):
