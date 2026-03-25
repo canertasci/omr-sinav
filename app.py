@@ -1,6 +1,7 @@
 """
 OMR Ana Uygulama — giriş sayfası + ana sayfa (dashboard).
 Sınav, şablon ve geçmiş işlemleri pages/ dizinindeki sayfalarda.
+PWA: Progressive Web App (offline, mobile install)
 """
 import json
 import os
@@ -10,6 +11,47 @@ import bcrypt
 import pandas as pd
 import streamlit as st
 from datetime import datetime
+
+# ─── PWA Setup (Manifest + Service Worker) ────────────────────────────────
+st.set_page_config(
+    page_title="OMR Tarama",
+    page_icon="📋",
+    layout="wide",
+    initial_sidebar_state="auto",
+    menu_items={
+        "Get Help": "https://github.com/canertasci/omr-sinav",
+        "Report a bug": "https://github.com/canertasci/omr-sinav/issues",
+        "About": "OMR Sınav Tarama Sistemi v1.0"
+    }
+)
+
+# PWA manifest injection (HTML head'e)
+manifest_path = os.path.join(os.path.dirname(__file__), ".streamlit", "manifest.json")
+if os.path.exists(manifest_path):
+    st.markdown(
+        '<link rel="manifest" href="data:application/json;base64,' +
+        __import__("base64").b64encode(
+            open(manifest_path, "rb").read()
+        ).decode() +
+        '">',
+        unsafe_allow_html=True
+    )
+
+# Service Worker registration
+st.markdown(
+    """
+    <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/.streamlit/service-worker.js')
+                .then(reg => console.log('✅ Service Worker registered'))
+                .catch(err => console.log('❌ Service Worker registration failed:', err));
+        });
+    }
+    </script>
+    """,
+    unsafe_allow_html=True
+)
 
 DB_YOLU = os.path.join(os.getcwd(), "omr.db")
 TARAMA_DPI = 150

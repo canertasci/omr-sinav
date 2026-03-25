@@ -9,9 +9,14 @@ import 'router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Firebase init hatası: $e');
+    // Hata olsa bile uygulamayı başlat; login ekranı hatayı gösterir
+  }
   runApp(const ProviderScope(child: OmrApp()));
 }
 
@@ -22,7 +27,7 @@ class OmrApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
-      title: 'OMR Öğretmen',
+      title: 'ÖğretmenAI',
       debugShowCheckedModeBanner: false,
       routerConfig: router,
       theme: AppTheme.light,
@@ -63,7 +68,7 @@ class AppTheme {
       backgroundColor: _lightColors.primary,
       foregroundColor: _lightColors.onPrimary,
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
@@ -88,7 +93,7 @@ class AppTheme {
       elevation: 0,
       backgroundColor: _darkColors.surface,
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),

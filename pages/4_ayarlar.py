@@ -13,12 +13,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils_st.auth import giris_gerekli, mevcut_kullanici, cikis_yap
 from utils_st.db import get_db
-from utils_st.ui import css_uygula
+from utils_st.ui import css_uygula, sidebar_goster
 
 giris_gerekli()
 
 st.set_page_config(page_title="Ayarlar — OMR", layout="centered")
 css_uygula()
+sidebar_goster()
 
 kullanici = mevcut_kullanici()
 uid: int = kullanici["id"]

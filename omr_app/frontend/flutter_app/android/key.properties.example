@@ -1,0 +1,4 @@
+storePassword=<keystore_şifresi>
+keyPassword=<key_şifresi>
+keyAlias=upload
+storeFile=../keystore/upload-keystore.jks

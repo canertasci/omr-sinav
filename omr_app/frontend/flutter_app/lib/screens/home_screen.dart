@@ -30,7 +30,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('OMR Öğretmen'),
+        title: const Text('ÖğretmenAI'),
         actions: [
           IconButton(
             icon: const Icon(Icons.person),
@@ -102,30 +102,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     _MenuCard(
                       icon: Icons.document_scanner,
                       label: 'Kağıt Tara',
-                      subtitle: 'Anlık veya toplu tarama',
+                      subtitle: 'PDF veya kamera ile tara',
                       color: theme.colorScheme.primary,
-                      onTap: () => context.go('/scan'),
+                      onTap: () => context.push('/scan'),
                     ),
                     _MenuCard(
                       icon: Icons.picture_as_pdf,
                       label: 'Şablon Oluştur',
                       subtitle: 'OMR kağıdı indir',
                       color: Colors.deepOrange,
-                      onTap: () => context.go('/template'),
+                      onTap: () => context.push('/template'),
                     ),
                     _MenuCard(
                       icon: Icons.bar_chart,
                       label: 'Sonuçlar',
                       subtitle: 'Sınav raporları',
                       color: Colors.teal,
-                      onTap: () => context.go('/results/demo'),
+                      onTap: () => context.push('/results/demo'),
                     ),
                     _MenuCard(
-                      icon: Icons.toll,
-                      label: 'Kredi Al',
-                      subtitle: 'Mağaza & reklamlar',
-                      color: Colors.amber.shade700,
-                      onTap: () => context.go('/profile'),
+                      icon: Icons.settings,
+                      label: 'Ayarlar',
+                      subtitle: 'API Key & hesap',
+                      color: Colors.blueGrey,
+                      onTap: () => context.push('/profile'),
                     ),
                   ],
                 ),

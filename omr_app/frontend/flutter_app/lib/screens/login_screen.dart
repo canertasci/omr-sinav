@@ -69,14 +69,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Icon(Icons.document_scanner, size: 72, color: theme.colorScheme.primary),
                   const SizedBox(height: 16),
                   Text(
-                    'OMR Öğretmen',
+                    'ÖğretmenAI',
                     style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: theme.colorScheme.primary,
                     ),
                   ),
                   Text(
-                    'Optik Sınav Değerlendirme',
+                    'Sınav Değerlendirme Modülü',
                     style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey),
                   ),
                   const SizedBox(height: 36),

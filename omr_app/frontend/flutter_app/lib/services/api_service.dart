@@ -16,8 +16,8 @@ class ApiService {
   ApiService() {
     _dio = Dio(BaseOptions(
       baseUrl: _kBaseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 60),
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 120),
     ));
 
     // Firebase ID Token interceptor
@@ -44,6 +44,7 @@ class ApiService {
     required String sablonId,
     required Map<String, String> cevapAnahtari,
     required int soruSayisi,
+    String? geminiApiKey,
   }) async {
     final bytes = await imageFile.readAsBytes();
     final b64 = base64Encode(bytes);
@@ -54,6 +55,8 @@ class ApiService {
       'sinav_id': sinavId,
       'cevap_anahtari': cevapAnahtari,
       'soru_sayisi': soruSayisi,
+      if (geminiApiKey != null && geminiApiKey.isNotEmpty)
+        'gemini_api_key': geminiApiKey,
     });
 
     return ScanResult.fromJson(resp.data as Map<String, dynamic>);
@@ -86,6 +89,40 @@ class ApiService {
         .where((s) => s['sonuc'] != null)
         .map((s) => ScanResult.fromJson(s['sonuc'] as Map<String, dynamic>))
         .toList();
+  }
+
+  // ── Excel Sınav ───────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> scanExcelSinav({
+    required List<File> imageFiles,
+    required Map<String, String> cevapAnahtari,
+    required int soruSayisi,
+    String sinavAdi = 'Sinav',
+    File? ogrenciListesiExcel,
+    String? geminiApiKey,
+  }) async {
+    final goruntuler = <String>[];
+    for (final f in imageFiles) {
+      final bytes = await f.readAsBytes();
+      goruntuler.add(base64Encode(bytes));
+    }
+
+    String? ogrenciListesiB64;
+    if (ogrenciListesiExcel != null) {
+      final bytes = await ogrenciListesiExcel.readAsBytes();
+      ogrenciListesiB64 = base64Encode(bytes);
+    }
+
+    final resp = await _dio.post('/api/v1/scan/excel-sinav', data: {
+      'goruntuler': goruntuler,
+      'cevap_anahtari': cevapAnahtari,
+      'soru_sayisi': soruSayisi,
+      'sinav_adi': sinavAdi,
+      if (ogrenciListesiB64 != null) 'ogrenci_listesi_b64': ogrenciListesiB64,
+      if (geminiApiKey != null && geminiApiKey.isNotEmpty)
+        'gemini_api_key': geminiApiKey,
+    });
+    return resp.data as Map<String, dynamic>;
   }
 
   // ── Şablon ────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@ from utils_st.db import get_db
 from utils_st.excel import excel_detay, excel_ozet, excel_not_girisi
 from utils_st.omr import get_gemini_key, kagit_oku_web
 from utils_st.ui import css_uygula, sidebar_goster
+from utils_st.camera import kamera_tarama_component, csv_ogrenci_listesi_yukle
 
 giris_gerekli()
 
@@ -82,10 +83,24 @@ try:
                 format_func=lambda x: x[1],
             )
     with c2:
-        liste = st.selectbox(
-            "Öğrenci Listesi (opsiyonel)", [None] + list(listeler),
-            format_func=lambda x: "Seçme" if x is None else x[1],
-        )
+        # Öğrenci listesi: mevcut DB veya CSV yükle
+        liste_tab1, liste_tab2 = st.tabs(["Mevcut Listeler", "CSV Yükle"])
+
+        liste = None  # Varsayılan
+        with liste_tab1:
+            liste = st.selectbox(
+                "Öğrenci Listesi (opsiyonel)", [None] + list(listeler),
+                format_func=lambda x: "Seçme" if x is None else x[1],
+            )
+
+        with liste_tab2:
+            st.caption("Yalova UBS format: Sütun A = No, Sütun B = Ad")
+            csv_temp = csv_ogrenci_listesi_yukle()
+            if csv_temp:
+                # CSV'den gelen listeyi kullan
+                og_dict = {o["no"]: o["ad"] for o in csv_temp}
+                st.session_state["csv_liste"] = csv_temp
+
         _api_key_sabit = get_gemini_key()
         if _api_key_sabit:
             api_key = _api_key_sabit
@@ -101,9 +116,25 @@ try:
                     "> 🔒 Key sadece bu oturumda kullanılır, sunucuda saklanmaz."
                 )
 
-    pdf = st.file_uploader("Sınav PDF", type=["pdf"])
+    # ─── Tarama Seçeneği: PDF vs Kamera ────────────────────────────────
+    st.divider()
+    tarama_tipi = st.radio(
+        "Tarama Yöntemi",
+        ["PDF Yükle", "📱 Kameradan Çek"],
+        horizontal=True,
+        help="PDF: Tüm kağıtları birden | Kamera: Teker teker tarama"
+    )
 
-    if pdf and api_key and st.button("Sınavı Oku", type="primary", use_container_width=True):
+    pdf = None
+    kamera_goruntusu = None
+
+    if tarama_tipi == "PDF Yükle":
+        pdf = st.file_uploader("Sınav PDF", type=["pdf"])
+    else:
+        st.info("💡 **Kamera Taraması:** Sınav kağıdını kameraya doğru tutarak fotoğraf çek.")
+        kamera_goruntusu = kamera_tarama_component()
+
+    if (pdf or (tarama_tipi == "📱 Kameradan Çek" and kamera_goruntusu and kamera_goruntusu.get("status") == "captured")) and api_key and st.button("Sınavı Oku", type="primary", use_container_width=True):
         anahtardict: dict[int, str] = {int(k): v for k, v in json.loads(anahtar[3]).items()}
         ss: int = sablon[2]
 
@@ -119,17 +150,36 @@ try:
         if liste:
             og_dict = {o["no"]: o["ad"] for o in json.loads(liste[2])}
 
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            f.write(pdf.read())
-            tmp = f.name
-        try:
-            with st.spinner("PDF dönüştürülüyor..."):
-                sayfalar = convert_from_path(tmp, dpi=150, poppler_path=POPPLER_PATH)
-        finally:
+        # ─── PDF vs Kamera İşleme ────────────────────────────────
+        sayfalar = []
+
+        if tarama_tipi == "PDF Yükle":
+            # PDF modunda: tüm sayfaları birden işle
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                f.write(pdf.read())
+                tmp = f.name
             try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+                with st.spinner("PDF dönüştürülüyor..."):
+                    sayfalar = convert_from_path(tmp, dpi=150, poppler_path=POPPLER_PATH)
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        else:
+            # Kamera modunda: tek görüntüyü PIL Image'a çevir
+            from PIL import Image
+            import io
+            import base64
+
+            img_b64 = kamera_goruntusu.get("image_base64", "")
+            if img_b64.startswith("data:image"):
+                # Data URI format: "data:image/jpeg;base64,..."
+                img_b64 = img_b64.split(",")[1]
+
+            img_bytes = base64.b64decode(img_b64)
+            img = Image.open(io.BytesIO(img_bytes))
+            sayfalar = [img]
 
         toplam = len(sayfalar)
         st.write(f"**{toplam} sayfa bulundu**")
