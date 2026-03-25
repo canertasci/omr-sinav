@@ -15,9 +15,8 @@ from utils_st.auth import giris_gerekli, mevcut_kullanici, cikis_yap
 from utils_st.db import get_db
 from utils_st.ui import css_uygula, sidebar_goster
 
-giris_gerekli()
-
 st.set_page_config(page_title="Ayarlar — OMR", layout="centered")
+giris_gerekli()
 css_uygula()
 sidebar_goster()
 

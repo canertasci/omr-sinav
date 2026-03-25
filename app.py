@@ -189,13 +189,8 @@ def _dashboard_verileri(uid: int) -> tuple:
 
 
 # ─── UYGULAMA GİRİŞ NOKTASI ─────────────────────────────────
+# set_page_config zaten dosyanın başında çağrıldı
 
-st.set_page_config(
-    page_title="ÖğretmenAI | OMR Sistemi",
-    page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 try:
     from utils_st.ui import css_uygula, sidebar_goster
 except Exception as _imp_err:

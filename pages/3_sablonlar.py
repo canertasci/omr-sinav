@@ -17,9 +17,8 @@ from utils_st.auth import giris_gerekli, mevcut_kullanici
 from utils_st.db import cache_temizle, get_db
 from utils_st.ui import css_uygula, sidebar_goster, sil_butonu, sil_onay_goster
 
-giris_gerekli()
-
 st.set_page_config(page_title="Şablon & Anahtar — OMR", layout="wide")
+giris_gerekli()
 css_uygula()
 sidebar_goster()
 

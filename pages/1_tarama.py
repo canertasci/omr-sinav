@@ -23,9 +23,8 @@ from utils_st.omr import get_gemini_key, kagit_oku_web
 from utils_st.ui import css_uygula, sidebar_goster
 from utils_st.camera import kamera_tarama_component, csv_ogrenci_listesi_yukle
 
-giris_gerekli()
-
 st.set_page_config(page_title="Sınav Oku — OMR", layout="wide")
+giris_gerekli()
 css_uygula()
 sidebar_goster()
 
